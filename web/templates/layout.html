@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{block "title" .}}{{end}} · monolith</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {{block "body" .}}
+  <aside>
+    <a class="brand" href="/">monolith</a>
+    <nav>
+      <a href="/finance/assets">Assets</a>
+    </nav>
+    <form method="post" action="/auth/logout">
+      <button type="submit">Log out</button>
+    </form>
+  </aside>
+  <main>
+    {{template "content" .}}
+  </main>
+  {{end}}
+</body>
+</html>

@@ -1,0 +1,16 @@
+{{define "title"}}Log in{{end}}
+{{define "body"}}
+<main>
+<h1>monolith</h1>
+<form method="post" action="/auth/login">
+  <label>Email
+    <input type="email" name="email" value="{{.Email}}" autocomplete="username" required>
+  </label>
+  <label>Password
+    <input type="password" name="password" autocomplete="current-password" required>
+  </label>
+  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
+  <button type="submit" class="primary">Log in</button>
+</form>
+</main>
+{{end}}

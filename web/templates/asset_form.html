@@ -1,0 +1,22 @@
+{{define "title"}}{{.Title}}{{end}}
+{{define "content"}}
+<h1>{{.Title}}</h1>
+<form method="post">
+  <label>Type
+    <select name="type" required>
+      {{range .Types}}<option value="{{.}}"{{if eq . $.Type}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </label>
+  <label>Name
+    <input name="name" value="{{.Name}}" required>
+  </label>
+  <label>Amount (USD)
+    <input name="amount" value="{{.Amount}}" inputmode="decimal" placeholder="1,234.56" required>
+  </label>
+  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
+  <div class="actions">
+    <button type="submit" class="primary">Save</button>
+    <a class="button" href="/finance/assets">Cancel</a>
+  </div>
+</form>
+{{end}}

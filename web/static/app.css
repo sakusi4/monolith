@@ -1,0 +1,308 @@
+:root {
+  color-scheme: light dark;
+  --font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  --size: 14px;
+  --size-small: 13px;
+  --size-title: 20px;
+  --control-height: 32px;
+  --radius: 6px;
+  --gap: 16px;
+  --sidebar-width: 220px;
+
+  --bg: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --bg-hover: #eaeef2;
+  --text: #1f2328;
+  --muted: #59636e;
+  --border: #d1d9e0;
+  --accent: #0969da;
+  --on-accent: #ffffff;
+  --danger: #d1242f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --bg-subtle: #151b23;
+    --bg-hover: #262c36;
+    --text: #f0f6fc;
+    --muted: #9198a1;
+    --border: #3d444d;
+    --accent: #4493f8;
+    --on-accent: #0d1117;
+    --danger: #f85149;
+  }
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font: var(--size)/1.5 var(--font);
+  color: var(--text);
+  background: var(--bg);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+h1 {
+  margin: 0 0 var(--gap);
+  font-size: var(--size-title);
+  font-weight: 600;
+}
+
+body:has(> aside) {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap) 12px;
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border);
+}
+
+aside a,
+aside button {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  text-align: left;
+  font-weight: 400;
+}
+
+aside a:hover,
+aside button:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+
+aside .brand {
+  font-weight: 600;
+}
+
+aside nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+aside form {
+  margin-top: auto;
+}
+
+aside button {
+  color: var(--muted);
+}
+
+main {
+  width: 100%;
+  max-width: 960px;
+  padding: 24px 32px;
+}
+
+main > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--gap);
+}
+
+main > header h1 {
+  margin: 0;
+}
+
+main > p {
+  color: var(--muted);
+}
+
+input,
+select,
+button,
+.button {
+  height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-subtle);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+button:hover,
+.button:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+
+.primary,
+.primary:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.primary:hover {
+  filter: brightness(1.1);
+}
+
+main form {
+  display: grid;
+  gap: 12px;
+  max-width: 400px;
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  font-weight: 500;
+}
+
+label input,
+label select {
+  width: 100%;
+  font-weight: 400;
+}
+
+select {
+  padding: 0 8px;
+}
+
+form .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+[role="alert"] {
+  margin: 0;
+  color: var(--danger);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+th {
+  color: var(--muted);
+  font-size: var(--size-small);
+  font-weight: 600;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+td.actions > * + * {
+  margin-left: 12px;
+}
+
+td form {
+  display: inline;
+}
+
+td button.danger {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--danger);
+  font-weight: 400;
+}
+
+td button.danger:hover {
+  text-decoration: underline;
+}
+
+body:not(:has(> aside)) main {
+  max-width: 360px;
+  margin: 12vh auto 0;
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+
+body:not(:has(> aside)) button {
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  body:has(> aside) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+
+  aside {
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  aside a,
+  aside button {
+    width: auto;
+  }
+
+  aside nav {
+    flex-direction: row;
+  }
+
+  aside form {
+    margin: 0 0 0 auto;
+  }
+
+  main {
+    padding: 16px;
+  }
+}

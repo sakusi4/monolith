@@ -1,0 +1,31 @@
+{{define "title"}}Assets{{end}}
+{{define "content"}}
+<header>
+  <h1>Assets</h1>
+  <a class="button primary" href="/finance/assets/new">Add asset</a>
+</header>
+{{if .}}
+<table>
+  <thead>
+    <tr><th>Type</th><th>Name</th><th class="num">Amount</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .}}
+    <tr>
+      <td>{{.Type.Label}}</td>
+      <td>{{.Name}}</td>
+      <td class="num">{{usd .AmountCents}}</td>
+      <td class="actions">
+        <a href="/finance/assets/{{.ID}}/edit" aria-label="Edit {{.Name}}">Edit</a>
+        <form method="post" action="/finance/assets/{{.ID}}/delete" onsubmit="return confirm('Delete this asset?')">
+          <button type="submit" class="danger" aria-label="Delete {{.Name}}">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No assets yet.</p>
+{{end}}
+{{end}}

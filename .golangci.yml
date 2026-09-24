@@ -1,0 +1,40 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - exhaustive
+    - noctx
+    - revive
+    - rowserrcheck
+    - sloglint
+    - sqlclosecheck
+  settings:
+    revive:
+      enable-default-rules: true
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+    errcheck:
+      exclude-functions:
+        - (*database/sql.Tx).Rollback
+    sloglint:
+      attr-only: true
+      context: all
+      static-msg: true
+      msg-style: lowercased
+      key-naming-case: snake
+  exclusions:
+    presets:
+      - std-error-handling
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/sakusi4/monolith

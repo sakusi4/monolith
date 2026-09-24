@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: monolith
+    ports:
+      - "5432:5432"
+    volumes:
+      - db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  db:
