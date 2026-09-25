@@ -49,11 +49,11 @@ func TestParseAssetQuery(t *testing.T) {
 
 func TestAssetQuery_Apply(t *testing.T) {
 	rows := []assetRow{
-		{Asset: Asset{Name: "bravo", Type: AssetStock, Currency: money.USD}, USD: 300, HasUSD: true},
-		{Asset: Asset{Name: "Alpha", Type: AssetLoan, Currency: money.KRW}, USD: -500, HasUSD: true},
-		{Asset: Asset{Name: "charlie", Type: AssetCash, Currency: money.AED}},
-		{Asset: Asset{Name: "delta", Type: AssetCash, Currency: money.USD}},
-		{Asset: Asset{Name: "echo", Type: AssetCash, Currency: money.USD}, USD: 100, HasUSD: true},
+		{Item: SnapshotItem{Name: "bravo", Type: AssetStock, Currency: money.USD}, USD: 300, HasUSD: true},
+		{Item: SnapshotItem{Name: "Alpha", Type: AssetLoan, Currency: money.KRW}, USD: -500, HasUSD: true},
+		{Item: SnapshotItem{Name: "charlie", Type: AssetCash, Currency: money.AED}},
+		{Item: SnapshotItem{Name: "delta", Type: AssetCash, Currency: money.USD}},
+		{Item: SnapshotItem{Name: "echo", Type: AssetCash, Currency: money.USD}, USD: 100, HasUSD: true},
 	}
 	tests := []struct {
 		name string
@@ -70,7 +70,7 @@ func TestAssetQuery_Apply(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
 			for _, r := range tt.q.apply(rows) {
-				got = append(got, r.Asset.Name)
+				got = append(got, r.Item.Name)
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("apply() = %v, want %v", got, tt.want)
@@ -81,17 +81,17 @@ func TestAssetQuery_Apply(t *testing.T) {
 
 func TestTotalOf(t *testing.T) {
 	usd := func(amount int64) assetRow {
-		return assetRow{Asset: Asset{Currency: money.USD}, Amount: amount, USD: amount, HasUSD: true}
+		return assetRow{Item: SnapshotItem{Currency: money.USD, Amount: amount}, USD: amount, HasUSD: true}
 	}
 	tests := []struct {
 		name string
 		rows []assetRow
-		want assetTotal
+		want rowTotal
 	}{
-		{"one currency sums amounts", []assetRow{usd(100), usd(-30)}, assetTotal{Amount: 70, Currency: money.USD, HasAmount: true, USD: 70, HasUSD: true}},
-		{"mixed currencies sum only USD", []assetRow{usd(100), {Asset: Asset{Currency: money.KRW}, Amount: 5000, USD: 500, HasUSD: true}}, assetTotal{Amount: 5100, Currency: money.USD, USD: 600, HasUSD: true}},
-		{"a row without USD hides the USD total", []assetRow{usd(100), {Asset: Asset{Currency: money.AED}, Amount: 1}}, assetTotal{Amount: 101, Currency: money.USD, USD: 100}},
-		{"no rows", nil, assetTotal{}},
+		{"one currency sums amounts", []assetRow{usd(100), usd(-30)}, rowTotal{Amount: 70, Currency: money.USD, HasAmount: true, USD: 70, HasUSD: true}},
+		{"mixed currencies sum only USD", []assetRow{usd(100), {Item: SnapshotItem{Currency: money.KRW, Amount: 5000}, USD: 500, HasUSD: true}}, rowTotal{Amount: 5100, Currency: money.USD, USD: 600, HasUSD: true}},
+		{"a row without USD hides the USD total", []assetRow{usd(100), {Item: SnapshotItem{Currency: money.AED, Amount: 1}}}, rowTotal{Amount: 101, Currency: money.USD, USD: 100}},
+		{"no rows", nil, rowTotal{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -336,11 +336,6 @@ button,
   font: inherit;
 }
 
-select:disabled {
-  background: var(--bg-subtle);
-  color: var(--muted);
-}
-
 button,
 .button {
   display: inline-flex;

@@ -26,23 +26,38 @@ type Snapshot struct {
 	Items []SnapshotItem
 }
 
-// SnapshotItem carries the exchange rate of the month closest to the snapshot month in RateMonth
-// and PerUSD. PerUSD is nil for USD assets and for currencies without any stored rate.
+// SnapshotItem is one row of a snapshot. RateMonth and PerUSD hold the exchange rate of the month
+// closest to the snapshot month; PerUSD is nil for USD and for currencies without any stored rate.
 type SnapshotItem struct {
-	Asset     Asset
+	ID        int64
+	Name      string
+	Type      AssetType
+	Currency  money.Currency
 	Amount    int64
 	RateMonth time.Time
 	PerUSD    *big.Rat
 }
 
+// itemSuggestion is a name used in an earlier snapshot, with the type and currency it had most recently.
+type itemSuggestion struct {
+	Name     string
+	Type     AssetType
+	Currency money.Currency
+}
+
 func (it SnapshotItem) USD() (int64, bool) {
-	if it.Asset.Currency == money.USD {
-		return it.Amount, true
+	return usdValue(it.Currency, it.Amount, it.PerUSD)
+}
+
+// usdValue converts amount in c to USD cents. It reports false when c is not USD and has no rate.
+func usdValue(c money.Currency, amount int64, perUSD *big.Rat) (int64, bool) {
+	if c == money.USD {
+		return amount, true
 	}
-	if it.PerUSD == nil {
+	if perUSD == nil {
 		return 0, false
 	}
-	return money.ToUSD(it.Asset.Currency, it.Amount, it.PerUSD), true
+	return money.ToUSD(c, amount, perUSD), true
 }
 
 // Totals is the value of a snapshot in USD cents. NetWorth sums every item and Loans the
@@ -59,8 +74,8 @@ func (s Snapshot) Totals() Totals {
 		usd, ok := it.USD()
 		switch {
 		case !ok:
-			if !slices.Contains(t.Missing, it.Asset.Currency) {
-				t.Missing = append(t.Missing, it.Asset.Currency)
+			if !slices.Contains(t.Missing, it.Currency) {
+				t.Missing = append(t.Missing, it.Currency)
 			}
 		case usd < 0:
 			t.NetWorth += usd
@@ -87,26 +102,39 @@ func monthsUntil(last time.Time) []time.Time {
 }
 
 const snapshotQuery = `
-	SELECT s.id, s.month, s.note, a.id, a.type, a.name, a.currency, i.amount, r.month, r.per_usd
+	SELECT s.id, s.month, s.note, i.id, i.name, i.type, i.currency, i.amount, r.month, r.per_usd
 	FROM snapshots s
 	JOIN snapshot_items i ON i.snapshot_id = s.id
-	JOIN assets a ON a.id = i.asset_id
 	LEFT JOIN LATERAL (
 		SELECT er.month, er.per_usd::text AS per_usd
 		FROM exchange_rates er
-		WHERE er.currency = a.currency
+		WHERE er.currency = i.currency
 		ORDER BY abs(er.month - s.month), er.month
 		LIMIT 1
 	) r ON true`
 
 // Snapshots returns every snapshot, newest month first.
 func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
-	rows, err := s.db.QueryContext(ctx, snapshotQuery+` ORDER BY s.month DESC, a.type, a.name, a.id`)
+	rows, err := s.db.QueryContext(ctx, snapshotQuery+` ORDER BY s.month DESC, i.type, lower(i.name), i.id`)
 	if err != nil {
 		return nil, fmt.Errorf("query snapshots: %w", err)
 	}
 	defer rows.Close()
 	return scanSnapshots(rows)
+}
+
+// Snapshot returns month's snapshot, or a zero Snapshot when the month has none.
+func (s *Store) Snapshot(ctx context.Context, month time.Time) (Snapshot, error) {
+	rows, err := s.db.QueryContext(ctx, snapshotQuery+` WHERE s.month = $1 ORDER BY i.type, lower(i.name), i.id`, month)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("query snapshot: %w", err)
+	}
+	defer rows.Close()
+	snapshots, err := scanSnapshots(rows)
+	if err != nil || len(snapshots) == 0 {
+		return Snapshot{}, err
+	}
+	return snapshots[0], nil
 }
 
 func scanSnapshots(rows *sql.Rows) ([]Snapshot, error) {
@@ -120,7 +148,7 @@ func scanSnapshots(rows *sql.Rows) ([]Snapshot, error) {
 			rateMonth sql.Null[time.Time]
 			perUSD    sql.Null[string]
 		)
-		err := rows.Scan(&id, &month, &note, &it.Asset.ID, &it.Asset.Type, &it.Asset.Name, &it.Asset.Currency, &it.Amount, &rateMonth, &perUSD)
+		err := rows.Scan(&id, &month, &note, &it.ID, &it.Name, &it.Type, &it.Currency, &it.Amount, &rateMonth, &perUSD)
 		if err != nil {
 			return nil, fmt.Errorf("scan snapshot: %w", err)
 		}
@@ -141,6 +169,32 @@ func scanSnapshots(rows *sql.Rows) ([]Snapshot, error) {
 		return nil, fmt.Errorf("query snapshots: %w", err)
 	}
 	return snapshots, nil
+}
+
+// itemSuggestions lists every name used in a snapshot once, by name, with its most recent type and currency.
+func (s *Store) itemSuggestions(ctx context.Context) ([]itemSuggestion, error) {
+	query := `
+		SELECT DISTINCT ON (lower(i.name)) i.name, i.type, i.currency
+		FROM snapshot_items i
+		JOIN snapshots s ON s.id = i.snapshot_id
+		ORDER BY lower(i.name), s.month DESC, i.id DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query item suggestions: %w", err)
+	}
+	defer rows.Close()
+	var suggestions []itemSuggestion
+	for rows.Next() {
+		var sg itemSuggestion
+		if err := rows.Scan(&sg.Name, &sg.Type, &sg.Currency); err != nil {
+			return nil, fmt.Errorf("scan item suggestion: %w", err)
+		}
+		suggestions = append(suggestions, sg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query item suggestions: %w", err)
+	}
+	return suggestions, nil
 }
 
 // SetNote replaces the note of month's snapshot. It returns ErrSnapshotNotFound when the month has no snapshot.

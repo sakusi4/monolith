@@ -39,10 +39,13 @@ func TestFinance(t *testing.T) {
 		form := url.Values{"name": {name}, "type": {typ}, "currency": {currency}, "amount": {amount}}
 		wantRedirect(t, s.post(t, "/finance/snapshots/"+month+"/items/new", form, session), "/finance/snapshots?direction=desc&month="+month+"&order=usd")
 	}
-	assetID := func(t *testing.T, name string) string {
+	itemID := func(t *testing.T, month, name, currency string) string {
 		t.Helper()
 		var id int64
-		if err := s.db.QueryRowContext(t.Context(), `SELECT id FROM assets WHERE name = $1`, name).Scan(&id); err != nil {
+		query := `
+			SELECT i.id FROM snapshot_items i JOIN snapshots s ON s.id = i.snapshot_id
+			WHERE s.month = $1 AND i.name = $2 AND i.currency = $3`
+		if err := s.db.QueryRowContext(t.Context(), query, month+"-01", name, currency).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return strconv.FormatInt(id, 10)
@@ -78,7 +81,6 @@ func TestFinance(t *testing.T) {
 			{"name": {"  "}, "type": {"cash"}, "currency": {"USD"}, "amount": {"1"}},
 			{"name": {"Euro cash"}, "type": {"cash"}, "currency": {"EUR"}, "amount": {"1"}},
 			{"name": {"Won cash"}, "type": {"cash"}, "currency": {"KRW"}, "amount": {"12.5"}},
-			{"name": {"brokerage"}, "type": {"stock"}, "currency": {"USD"}, "amount": {"1"}},
 		} {
 			wantStatus(t, "/finance/snapshots/2025-01/items/new", form, http.StatusUnprocessableEntity)
 		}
@@ -90,53 +92,57 @@ func TestFinance(t *testing.T) {
 		wantStatus(t, "/finance/snapshots/2025-04/note", url.Values{"note": {"Empty month"}}, http.StatusNotFound)
 	})
 
-	t.Run("an existing name takes the asset's type and currency", func(t *testing.T) {
-		rec := s.post(t, "/finance/snapshots/2025-02/items/new", url.Values{"name": {"savings"}, "amount": {"1.5"}}, session)
-		if body := rec.Body.String(); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, `<select name="type" disabled>`) || !strings.Contains(body, `<option value="KRW" selected>`) {
-			t.Errorf("existing asset with an invalid amount = %d, want 422 with its type and currency fixed:\n%s", rec.Code, body)
+	t.Run("names can repeat and earlier names are suggested", func(t *testing.T) {
+		add(t, "2025-02", "Brokerage", "stock", "USD", "12.50")
+		add(t, "2025-02", "Brokerage", "stock", "KRW", "1,000,000")
+		got := body(t, "/finance/snapshots?month=2025-02")
+		for _, want := range []string{"USD 12.50", "KRW 1,000,000", `<option value="Savings" data-type="deposit" data-currency="KRW">`} {
+			if !strings.Contains(got, want) {
+				t.Errorf("GET 2025-02 does not contain %q:\n%s", want, got)
+			}
 		}
-		add(t, "2025-02", "brokerage", "", "", "12.50")
-		wantContains(t, "/finance/snapshots?month=2025-02", "Brokerage", "USD 12.50")
-		if n := count(t, `SELECT count(*) FROM assets`); n != 3 {
-			t.Errorf("assets = %d, want 3", n)
+		if strings.Contains(got, `<option value="Brokerage"`) {
+			t.Errorf("GET 2025-02 suggests Brokerage, which the month already has")
 		}
 	})
 
 	t.Run("an empty month copies the previous snapshot once", func(t *testing.T) {
-		wantContains(t, "/finance/snapshots?month=2025-03", "Copy Feb 2025 (1 assets)")
+		wantContains(t, "/finance/snapshots?month=2025-03", "Copy last recorded month")
 		wantRedirect(t, s.post(t, "/finance/snapshots/2025-03/copy", nil, session), "/finance/snapshots?direction=desc&month=2025-03&order=usd")
 		wantContains(t, "/finance/snapshots?month=2025-03", "Brokerage", "USD 12.50")
+		wantRedirect(t, s.post(t, "/finance/snapshots/2025-05/copy", nil, session), "/finance/snapshots?direction=desc&month=2025-05&order=usd")
+		wantContains(t, "/finance/snapshots?month=2025-05", "Brokerage", "USD 12.50")
 		wantStatus(t, "/finance/snapshots/2025-03/copy", nil, http.StatusUnprocessableEntity)
 		wantStatus(t, "/finance/snapshots/2024-02/copy", nil, http.StatusUnprocessableEntity)
 	})
 
-	t.Run("edit turns the row into inputs and saves it", func(t *testing.T) {
-		mortgage := assetID(t, "Mortgage")
+	t.Run("edit changes the row in its month only", func(t *testing.T) {
+		mortgage := itemID(t, "2025-01", "Mortgage", "KRW")
 		edit := "/finance/snapshots/2025-01/items/" + mortgage + "/edit"
 		wantContains(t, edit, `form="edit-item"`, `value="-5,000,000"`, `value="Mortgage"`)
-		wantRedirect(t, s.post(t, edit, url.Values{"name": {"Home loan"}, "type": {"loan"}, "amount": {"-6,000,000"}}, session), "/finance/snapshots?direction=desc&month=2025-01&order=usd")
+		saved := url.Values{"name": {"Home loan"}, "type": {"loan"}, "currency": {"KRW"}, "amount": {"-6,000,000"}}
+		wantRedirect(t, s.post(t, edit, saved, session), "/finance/snapshots?direction=desc&month=2025-01&order=usd")
 		wantContains(t, "/finance/snapshots?month=2025-01", "Home loan", "USD 24,000.00")
-		wantStatus(t, edit, url.Values{"name": {"savings"}, "type": {"loan"}, "amount": {"1"}}, http.StatusUnprocessableEntity)
-		wantStatus(t, edit, url.Values{"name": {"Home loan"}, "type": {"loan"}, "amount": {"1.5"}}, http.StatusUnprocessableEntity)
-		if rec := s.get(t, "/finance/snapshots/2025-02/items/"+mortgage+"/edit", session); rec.Code != http.StatusNotFound {
-			t.Errorf("edit of an asset outside the month = %d, want 404", rec.Code)
+		wantStatus(t, edit, url.Values{"name": {"Home loan"}, "type": {"loan"}, "currency": {"KRW"}, "amount": {"1.5"}}, http.StatusUnprocessableEntity)
+		wantStatus(t, edit, url.Values{"name": {" "}, "type": {"loan"}, "currency": {"KRW"}, "amount": {"1"}}, http.StatusUnprocessableEntity)
+		other := "/finance/snapshots/2025-02/items/" + mortgage + "/edit"
+		if rec := s.get(t, other, session); rec.Code != http.StatusNotFound {
+			t.Errorf("GET edit of a row outside the month = %d, want 404", rec.Code)
 		}
+		wantStatus(t, other, saved, http.StatusNotFound)
 	})
 
-	t.Run("delete removes the row, the empty month, and the unused asset", func(t *testing.T) {
-		brokerage := assetID(t, "Brokerage")
-		wantRedirect(t, s.post(t, "/finance/snapshots/2025-02/items/"+brokerage+"/delete", nil, session), "/finance/snapshots?direction=desc&month=2025-02&order=usd")
+	t.Run("delete removes only the row, and the month once it is empty", func(t *testing.T) {
+		usd, krw := itemID(t, "2025-02", "Brokerage", "USD"), itemID(t, "2025-02", "Brokerage", "KRW")
+		del := func(id string) string { return "/finance/snapshots/2025-02/items/" + id + "/delete" }
+		wantRedirect(t, s.post(t, del(usd), nil, session), "/finance/snapshots?direction=desc&month=2025-02&order=usd")
+		wantContains(t, "/finance/snapshots?month=2025-02", "KRW 1,000,000")
+		wantRedirect(t, s.post(t, del(krw), nil, session), "/finance/snapshots?direction=desc&month=2025-02&order=usd")
 		wantContains(t, "/finance/snapshots?month=2025-02", "No assets in Feb 2025 yet.")
 		if n := count(t, `SELECT count(*) FROM snapshots WHERE month = '2025-02-01'`); n != 0 {
 			t.Errorf("snapshots in Feb 2025 = %d, want 0", n)
 		}
-		wantStatus(t, "/finance/snapshots/2025-02/items/"+brokerage+"/delete", nil, http.StatusNotFound)
-
-		homeLoan := assetID(t, "Home loan")
-		wantRedirect(t, s.post(t, "/finance/snapshots/2025-01/items/"+homeLoan+"/delete", nil, session), "/finance/snapshots?direction=desc&month=2025-01&order=usd")
-		if n := count(t, `SELECT count(*) FROM assets WHERE name = 'Home loan'`); n != 0 {
-			t.Errorf("Home loan is still an asset after leaving its only month")
-		}
+		wantStatus(t, del(krw), nil, http.StatusNotFound)
 	})
 
 	t.Run("filters narrow the rows but not the net worth", func(t *testing.T) {
@@ -144,7 +150,7 @@ func TestFinance(t *testing.T) {
 		if strings.Contains(got, "<td>Brokerage</td>") || !strings.Contains(got, `<th scope="row">Total</th>`) {
 			t.Errorf("deposit filter does not show only Savings with a total:\n%s", got)
 		}
-		wantContains(t, "/finance/snapshots?month=2025-01&type=deposit", "USD 30,000.00", "KRW 20,000,000")
+		wantContains(t, "/finance/snapshots?month=2025-01&type=deposit", "USD 24,000.00", "KRW 20,000,000")
 	})
 
 	t.Run("filters and months outside the range are rejected", func(t *testing.T) {

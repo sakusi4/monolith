@@ -22,10 +22,15 @@ func NewHandler(store *Store, loc *time.Location) http.Handler {
 	mux.HandleFunc("POST /finance/snapshots/{month}/items/{id}/delete", h.deleteItem)
 	mux.HandleFunc("POST /finance/snapshots/{month}/copy", h.copySnapshot)
 	mux.HandleFunc("POST /finance/snapshots/{month}/note", h.updateNote)
+	mux.HandleFunc("GET /finance/expenses", h.listExpenses)
+	mux.HandleFunc("POST /finance/expenses/{month}/items/new", h.createExpense)
+	mux.HandleFunc("GET /finance/expenses/{month}/items/{id}/edit", h.editExpense)
+	mux.HandleFunc("POST /finance/expenses/{month}/items/{id}/edit", h.updateExpense)
+	mux.HandleFunc("POST /finance/expenses/{month}/items/{id}/delete", h.deleteExpense)
 	return mux
 }
 
-// months lists the months a snapshot can have, newest first.
+// months lists the months that snapshots and expenses can be recorded for, newest first.
 func (h *handler) months() []time.Time {
 	return monthsUntil(currentMonth(time.Now(), h.loc))
 }

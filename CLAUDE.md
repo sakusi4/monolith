@@ -172,7 +172,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 | 핸들러 메서드 | 동사 + 리소스, 접미사 없음 | `func (h *handler) createAsset` |
 | 템플릿 | `{주제}_{화면}.html`. 여러 페이지가 쓰는 조각은 `_` 접두 | `asset_list.html`, `_filters.html` |
 | receiver | 타입명 앞 1~2글자, 타입 안에서 통일 | `func (s *Store)` |
-| 테이블, 컬럼 | snake_case, 테이블은 복수형 | `snapshot_items.asset_id` |
+| 테이블, 컬럼 | snake_case, 테이블은 복수형 | `snapshot_items.snapshot_id` |
 | 마이그레이션 | 4자리 번호만. 1씩 증가, 설명을 붙이지 않는다 | `0003.sql` |
 
 1. 이름에 패키지명을 반복하지 않는다. 호출부에서 `패키지.이름`으로 읽힌다. `finance.Asset`(O), `finance.FinanceAsset`(X).

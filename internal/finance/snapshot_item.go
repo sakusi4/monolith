@@ -15,27 +15,16 @@ var ErrInvalidItem = errors.New("invalid item")
 
 var ErrItemNotFound = errors.New("item not found")
 
-var ErrItemExists = errors.New("asset is already in the month")
+var ErrNothingToCopy = errors.New("no earlier month to copy")
 
-var ErrNameTaken = errors.New("asset name is taken")
+var ErrMonthNotEmpty = errors.New("month is not empty")
 
-var ErrNothingToCopy = errors.New("no earlier snapshot to copy")
-
-var ErrMonthNotEmpty = errors.New("month already has a snapshot")
-
-// ItemInput adds an asset to a month. Type and Currency apply only when Name is a new asset.
+// ItemInput is one row of a month's snapshot, as added or edited.
 type ItemInput struct {
 	Name     string
 	Type     AssetType
 	Currency money.Currency
 	Amount   int64
-}
-
-// ItemUpdate changes an item of a month. Name and Type belong to the asset, so they change it in every month.
-type ItemUpdate struct {
-	Name   string
-	Type   AssetType
-	Amount int64
 }
 
 func (in ItemInput) Clean() (ItemInput, error) {
@@ -51,19 +40,7 @@ func (in ItemInput) Clean() (ItemInput, error) {
 	return in, nil
 }
 
-func (in ItemUpdate) Clean() (ItemUpdate, error) {
-	in.Name = strings.TrimSpace(in.Name)
-	switch {
-	case in.Name == "":
-		return ItemUpdate{}, fmt.Errorf("%w: name is empty", ErrInvalidItem)
-	case !in.Type.valid():
-		return ItemUpdate{}, fmt.Errorf("%w: unknown type %q", ErrInvalidItem, in.Type)
-	}
-	return in, nil
-}
-
-// AddItem records in for month, creating the month's snapshot and the asset when they do not exist.
-// It returns ErrItemExists when the asset is already in the month.
+// AddItem adds in to month, creating the month's snapshot when it does not exist.
 func (s *Store) AddItem(ctx context.Context, month time.Time, in ItemInput) error {
 	in, err := in.Clean()
 	if err != nil {
@@ -74,15 +51,6 @@ func (s *Store) AddItem(ctx context.Context, month time.Time, in ItemInput) erro
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
-	var assetID int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM assets WHERE lower(name) = lower($1)`, in.Name).Scan(&assetID)
-	if errors.Is(err, sql.ErrNoRows) {
-		query := `INSERT INTO assets (type, name, currency) VALUES ($1, $2, $3) RETURNING id`
-		err = tx.QueryRowContext(ctx, query, in.Type, in.Name, in.Currency).Scan(&assetID)
-	}
-	if err != nil {
-		return fmt.Errorf("find or insert asset: %w", err)
-	}
 	var snapshotID int64
 	query := `
 		INSERT INTO snapshots (month) VALUES ($1)
@@ -91,12 +59,8 @@ func (s *Store) AddItem(ctx context.Context, month time.Time, in ItemInput) erro
 	if err := tx.QueryRowContext(ctx, query, month).Scan(&snapshotID); err != nil {
 		return fmt.Errorf("upsert snapshot: %w", err)
 	}
-	query = `INSERT INTO snapshot_items (snapshot_id, asset_id, amount) VALUES ($1, $2, $3)`
-	_, err = tx.ExecContext(ctx, query, snapshotID, assetID, in.Amount)
-	if isPgError(err, uniqueViolation) {
-		return ErrItemExists
-	}
-	if err != nil {
+	query = `INSERT INTO snapshot_items (snapshot_id, name, type, currency, amount) VALUES ($1, $2, $3, $4, $5)`
+	if _, err := tx.ExecContext(ctx, query, snapshotID, in.Name, in.Type, in.Currency, in.Amount); err != nil {
 		return fmt.Errorf("insert item: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -105,45 +69,26 @@ func (s *Store) AddItem(ctx context.Context, month time.Time, in ItemInput) erro
 	return nil
 }
 
-// UpdateItem returns ErrNameTaken when another asset has the new name.
-func (s *Store) UpdateItem(ctx context.Context, month time.Time, assetID int64, in ItemUpdate) error {
+// UpdateItem replaces the row id of month. It returns ErrItemNotFound when month has no such row.
+func (s *Store) UpdateItem(ctx context.Context, month time.Time, id int64, in ItemInput) error {
 	in, err := in.Clean()
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer tx.Rollback()
 	query := `
-		UPDATE snapshot_items i SET amount = $3
+		UPDATE snapshot_items i SET name = $3, type = $4, currency = $5, amount = $6
 		FROM snapshots s
-		WHERE i.snapshot_id = s.id AND s.month = $1 AND i.asset_id = $2`
-	res, err := tx.ExecContext(ctx, query, month, assetID, in.Amount)
+		WHERE i.snapshot_id = s.id AND s.month = $1 AND i.id = $2`
+	res, err := s.db.ExecContext(ctx, query, month, id, in.Name, in.Type, in.Currency, in.Amount)
 	if err != nil {
 		return fmt.Errorf("update item: %w", err)
 	}
-	if err := requireRow(res, ErrItemNotFound); err != nil {
-		return err
-	}
-	query = `UPDATE assets SET name = $2, type = $3, updated_at = now() WHERE id = $1`
-	_, err = tx.ExecContext(ctx, query, assetID, in.Name, in.Type)
-	if isPgError(err, uniqueViolation) {
-		return ErrNameTaken
-	}
-	if err != nil {
-		return fmt.Errorf("update asset: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	return nil
+	return requireRow(res, ErrItemNotFound)
 }
 
-// DeleteItem removes the asset from month. It also removes the month's snapshot when it
-// becomes empty and the asset when no month records it any more.
-func (s *Store) DeleteItem(ctx context.Context, month time.Time, assetID int64) error {
+// DeleteItem removes the row id from month, and the month's snapshot with its note when it
+// becomes empty. It returns ErrItemNotFound when month has no such row.
+func (s *Store) DeleteItem(ctx context.Context, month time.Time, id int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -151,8 +96,8 @@ func (s *Store) DeleteItem(ctx context.Context, month time.Time, assetID int64) 
 	defer tx.Rollback()
 	query := `
 		DELETE FROM snapshot_items i USING snapshots s
-		WHERE i.snapshot_id = s.id AND s.month = $1 AND i.asset_id = $2`
-	res, err := tx.ExecContext(ctx, query, month, assetID)
+		WHERE i.snapshot_id = s.id AND s.month = $1 AND i.id = $2`
+	res, err := tx.ExecContext(ctx, query, month, id)
 	if err != nil {
 		return fmt.Errorf("delete item: %w", err)
 	}
@@ -165,19 +110,13 @@ func (s *Store) DeleteItem(ctx context.Context, month time.Time, assetID int64) 
 	if _, err := tx.ExecContext(ctx, query, month); err != nil {
 		return fmt.Errorf("delete empty snapshot: %w", err)
 	}
-	query = `
-		DELETE FROM assets a WHERE a.id = $1
-		AND NOT EXISTS (SELECT 1 FROM snapshot_items i WHERE i.asset_id = a.id)`
-	if _, err := tx.ExecContext(ctx, query, assetID); err != nil {
-		return fmt.Errorf("delete unused asset: %w", err)
-	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }
 
-// CopyPreviousSnapshot fills an empty month with the items of the latest earlier snapshot.
+// CopyPreviousSnapshot fills an empty month with copies of the rows of the latest earlier snapshot.
 // It returns ErrMonthNotEmpty or ErrNothingToCopy when it cannot.
 func (s *Store) CopyPreviousSnapshot(ctx context.Context, month time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -194,10 +133,11 @@ func (s *Store) CopyPreviousSnapshot(ctx context.Context, month time.Time) error
 		return fmt.Errorf("insert snapshot: %w", err)
 	}
 	query := `
-		INSERT INTO snapshot_items (snapshot_id, asset_id, amount)
-		SELECT $1, i.asset_id, i.amount
+		INSERT INTO snapshot_items (snapshot_id, name, type, currency, amount)
+		SELECT $1, i.name, i.type, i.currency, i.amount
 		FROM snapshot_items i
-		WHERE i.snapshot_id = (SELECT id FROM snapshots WHERE month < $2 ORDER BY month DESC LIMIT 1)`
+		WHERE i.snapshot_id = (SELECT id FROM snapshots WHERE month < $2 ORDER BY month DESC LIMIT 1)
+		ORDER BY i.id`
 	res, err := tx.ExecContext(ctx, query, snapshotID, month)
 	if err != nil {
 		return fmt.Errorf("copy items: %w", err)

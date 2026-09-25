@@ -13,12 +13,12 @@ import (
 func TestNewPage(t *testing.T) {
 	month := func(m time.Month) time.Time { return time.Date(2026, m, 1, 0, 0, 0, 0, time.UTC) }
 	usd := func(amount int64) finance.SnapshotItem {
-		return finance.SnapshotItem{Asset: finance.Asset{Currency: money.USD}, Amount: amount}
+		return finance.SnapshotItem{Currency: money.USD, Amount: amount}
 	}
 	snapshots := []finance.Snapshot{
 		{ID: 3, Month: month(time.September), Items: []finance.SnapshotItem{usd(500), usd(-200)}},
-		{ID: 2, Month: month(time.August), Items: []finance.SnapshotItem{usd(400), {Asset: finance.Asset{Currency: money.AED}, Amount: 1}}},
-		{ID: 1, Month: month(time.July), Items: []finance.SnapshotItem{{Asset: finance.Asset{Currency: money.KRW}, Amount: 1000, PerUSD: big.NewRat(10, 1)}}},
+		{ID: 2, Month: month(time.August), Items: []finance.SnapshotItem{usd(400), {Currency: money.AED, Amount: 1}}},
+		{ID: 1, Month: month(time.July), Items: []finance.SnapshotItem{{Currency: money.KRW, Amount: 1000, PerUSD: big.NewRat(10, 1)}}},
 	}
 
 	got := newPage(snapshots)

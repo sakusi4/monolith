@@ -48,15 +48,14 @@ type assetQuery struct {
 }
 
 type assetRow struct {
-	Asset  Asset
-	Amount int64
+	Item   SnapshotItem
 	USD    int64
 	HasUSD bool
 }
 
-// assetTotal sums rows. Amount is set only when they share one currency,
+// rowTotal sums a table's rows. Amount is set only when they share one currency,
 // and USD only when every one of them has a USD value.
-type assetTotal struct {
+type rowTotal struct {
 	Amount    int64
 	Currency  money.Currency
 	HasAmount bool
@@ -102,13 +101,13 @@ func (q assetQuery) filters() []web.Filter {
 	}
 }
 
-func (q assetQuery) matches(a Asset) bool {
-	return (q.Type == "" || a.Type == q.Type) && (q.Currency == "" || a.Currency == q.Currency)
+func (q assetQuery) matches(it SnapshotItem) bool {
+	return (q.Type == "" || it.Type == q.Type) && (q.Currency == "" || it.Currency == q.Currency)
 }
 
 // apply filters and sorts rows. Rows without a USD value always come last.
 func (q assetQuery) apply(rows []assetRow) []assetRow {
-	rows = slices.DeleteFunc(slices.Clone(rows), func(r assetRow) bool { return !q.matches(r.Asset) })
+	rows = slices.DeleteFunc(slices.Clone(rows), func(r assetRow) bool { return !q.matches(r.Item) })
 	slices.SortStableFunc(rows, func(a, b assetRow) int {
 		if a.HasUSD != b.HasUSD {
 			if a.HasUSD {
@@ -130,9 +129,9 @@ func (q assetQuery) compare(a, b assetRow) int {
 	case orderUSD:
 		return cmp.Compare(a.USD, b.USD)
 	case orderName:
-		return strings.Compare(strings.ToLower(a.Asset.Name), strings.ToLower(b.Asset.Name))
+		return strings.Compare(strings.ToLower(a.Item.Name), strings.ToLower(b.Item.Name))
 	case orderType:
-		return strings.Compare(a.Asset.Type.Label(), b.Asset.Type.Label())
+		return strings.Compare(a.Item.Type.Label(), b.Item.Type.Label())
 	}
 	return 0
 }
@@ -140,21 +139,21 @@ func (q assetQuery) compare(a, b assetRow) int {
 func assetRows(s Snapshot) []assetRow {
 	rows := make([]assetRow, len(s.Items))
 	for i, it := range s.Items {
-		rows[i] = assetRow{Asset: it.Asset, Amount: it.Amount}
+		rows[i] = assetRow{Item: it}
 		rows[i].USD, rows[i].HasUSD = it.USD()
 	}
 	return rows
 }
 
-func totalOf(rows []assetRow) assetTotal {
+func totalOf(rows []assetRow) rowTotal {
 	if len(rows) == 0 {
-		return assetTotal{}
+		return rowTotal{}
 	}
-	t := assetTotal{Currency: rows[0].Asset.Currency, HasAmount: true, HasUSD: true}
+	t := rowTotal{Currency: rows[0].Item.Currency, HasAmount: true, HasUSD: true}
 	for _, r := range rows {
-		t.HasAmount = t.HasAmount && r.Asset.Currency == t.Currency
+		t.HasAmount = t.HasAmount && r.Item.Currency == t.Currency
 		t.HasUSD = t.HasUSD && r.HasUSD
-		t.Amount += r.Amount
+		t.Amount += r.Item.Amount
 		t.USD += r.USD
 	}
 	return t

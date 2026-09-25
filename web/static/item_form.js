@@ -4,11 +4,11 @@ document.addEventListener("input", (event) => {
     return;
   }
   const name = input.value.trim().toLowerCase();
-  const asset = [...input.list.options].find((option) => option.value.toLowerCase() === name);
+  const suggestion = [...input.list.options].find((option) => option.value.toLowerCase() === name);
+  if (!suggestion) {
+    return;
+  }
   for (const select of input.form.querySelectorAll("select")) {
-    select.disabled = asset !== undefined;
-    if (asset) {
-      select.value = asset.dataset[select.name];
-    }
+    select.value = suggestion.dataset[select.name];
   }
 });

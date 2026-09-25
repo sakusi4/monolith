@@ -2,7 +2,6 @@ package finance
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -19,22 +18,22 @@ const (
 )
 
 type snapshotListPage struct {
-	Month      time.Time
-	Snapshot   Snapshot
-	Summary    summary
-	Rates      []appliedRate
-	NoteURL    string
-	MonthOpts  web.Filter
-	Filters    web.FilterBar
-	Rows       []snapshotRow
-	Total      assetTotal
-	Edit       itemForm
-	Add        itemForm
-	Candidates []Asset
-	Types      []AssetType
-	Currencies []money.Currency
-	Copy       copyOffer
-	Error      string
+	Month       time.Time
+	Snapshot    Snapshot
+	Summary     summary
+	Rates       []appliedRate
+	NoteURL     string
+	MonthOpts   web.Filter
+	Filters     web.FilterBar
+	Rows        []snapshotRow
+	Total       rowTotal
+	Edit        itemForm
+	Add         itemForm
+	Suggestions []itemSuggestion
+	Types       []AssetType
+	Currencies  []money.Currency
+	CopyURL     string
+	Error       string
 }
 
 type snapshotRow struct {
@@ -45,27 +44,21 @@ type snapshotRow struct {
 }
 
 // itemForm holds a row's form values as the user typed them, with the error to show next to them.
-// Existing marks an add form whose name is an existing asset, which fixes Type and Currency.
+// Type belongs to snapshot rows, and Category and Date to expenses.
 type itemForm struct {
-	AssetID   int64
 	Name      string
 	Type      AssetType
+	Category  ExpenseCategory
+	Date      string
 	Currency  money.Currency
 	Amount    string
-	Existing  bool
 	Error     string
 	Submitted bool
 	URL       string
 	CancelURL string
 }
 
-type copyOffer struct {
-	From  time.Time
-	Count int
-	URL   string
-}
-
-// listView is what a request adds to the snapshot list: a row being edited, rejected input, or an error.
+// listView is what a request adds to a month's list of snapshot items or expenses: a row being edited, rejected input, or an error.
 type listView struct {
 	EditID int64
 	Edit   itemForm
@@ -91,17 +84,17 @@ func (h *handler) renderList(w http.ResponseWriter, r *http.Request, status int,
 		http.NotFound(w, r)
 		return
 	}
-	assets, err := h.store.Assets(r.Context())
+	suggestions, err := h.store.itemSuggestions(r.Context())
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
 	}
-	snapshots, err := h.store.Snapshots(r.Context())
+	snapshot, err := h.store.Snapshot(r.Context(), q.Month)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
 	}
-	page, ok := newSnapshotListPage(q, months, assets, snapshots, view)
+	page, ok := newSnapshotListPage(q, months, suggestions, snapshot, view)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -109,75 +102,59 @@ func (h *handler) renderList(w http.ResponseWriter, r *http.Request, status int,
 	web.Render(w, r, status, "snapshot_list", page)
 }
 
-// newSnapshotListPage returns false when view edits an asset that is not in q.Month.
-func newSnapshotListPage(q assetQuery, months []time.Time, assets []Asset, snapshots []Snapshot, view listView) (snapshotListPage, bool) {
-	cur, prev := monthSnapshots(snapshots, q.Month)
+// newSnapshotListPage returns false when view edits a row that is not in q.Month.
+func newSnapshotListPage(q assetQuery, months []time.Time, suggestions []itemSuggestion, cur Snapshot, view listView) (snapshotListPage, bool) {
 	rows := q.apply(assetRows(cur))
 	tableRows, edit, ok := editableRows(q, rows, view)
 	if !ok {
 		return snapshotListPage{}, false
 	}
 	page := snapshotListPage{
-		Month:      q.Month,
-		Snapshot:   cur,
-		MonthOpts:  monthFilter(months, q.Month),
-		Filters:    web.FilterBar{Action: "/finance/snapshots", Filters: q.filters()},
-		Rows:       tableRows,
-		Total:      totalOf(rows),
-		Edit:       edit,
-		Add:        view.Add,
-		Candidates: candidates(assets, cur),
-		Types:      assetTypes,
-		Currencies: money.Currencies,
-		Error:      view.Error,
+		Month:       q.Month,
+		Snapshot:    cur,
+		MonthOpts:   monthFilter(months, q.Month),
+		Filters:     web.FilterBar{Action: "/finance/snapshots", Filters: q.filters()},
+		Rows:        tableRows,
+		Total:       totalOf(rows),
+		Edit:        edit,
+		Add:         view.Add,
+		Suggestions: unusedSuggestions(suggestions, cur),
+		Types:       assetTypes,
+		Currencies:  money.Currencies,
+		Error:       view.Error,
 	}
 	page.Add.URL = q.itemURL(q.Month, "items/new")
-	switch {
-	case cur.ID != 0:
-		page.Summary = summarize(cur, prev, prev.ID != 0)
-		page.Rates = appliedRates(cur)
+	if cur.ID != 0 {
+		page.Summary = summarize(cur)
+		page.Rates = appliedRates(cur.Month, snapshotRates(cur))
 		page.NoteURL = q.itemURL(q.Month, "note")
-	case prev.ID != 0:
-		page.Copy = copyOffer{From: prev.Month, Count: len(prev.Items), URL: q.itemURL(q.Month, "copy")}
+	} else {
+		page.CopyURL = q.itemURL(q.Month, "copy")
 	}
 	return page, true
 }
 
-// monthSnapshots finds the snapshot of month and the latest one before it in snapshots,
-// which are newest first. A zero ID means there is none.
-func monthSnapshots(snapshots []Snapshot, month time.Time) (cur, prev Snapshot) {
-	for _, s := range snapshots {
-		switch {
-		case s.Month.Equal(month):
-			cur = s
-		case s.Month.Before(month) && prev.ID == 0:
-			prev = s
-		}
-	}
-	return cur, prev
-}
-
 // editableRows adds the row actions to rows and returns the form of the row that view edits:
 // the input the user submitted, or else the row's current values. It returns false when
-// view edits an asset that is not in rows.
+// view edits a row that is not in rows.
 func editableRows(q assetQuery, rows []assetRow, view listView) ([]snapshotRow, itemForm, bool) {
 	var tableRows []snapshotRow
 	edit := view.Edit
 	found := view.EditID == 0
 	for _, row := range rows {
-		id := strconv.FormatInt(row.Asset.ID, 10)
+		id := strconv.FormatInt(row.Item.ID, 10)
 		sr := snapshotRow{
 			Row:       row,
-			Editing:   row.Asset.ID == view.EditID,
+			Editing:   row.Item.ID == view.EditID,
 			EditURL:   q.itemURL(q.Month, "items/"+id+"/edit"),
 			DeleteURL: q.itemURL(q.Month, "items/"+id+"/delete"),
 		}
 		if sr.Editing {
 			found = true
 			if !edit.Submitted {
-				edit = itemForm{Name: row.Asset.Name, Type: row.Asset.Type, Amount: money.Input(row.Asset.Currency, row.Amount)}
+				it := row.Item
+				edit = itemForm{Name: it.Name, Type: it.Type, Currency: it.Currency, Amount: money.Input(it.Currency, it.Amount)}
 			}
-			edit.AssetID, edit.Currency = row.Asset.ID, row.Asset.Currency
 			edit.URL, edit.CancelURL = sr.EditURL, q.listURL(q.Month)
 		}
 		tableRows = append(tableRows, sr)
@@ -185,12 +162,12 @@ func editableRows(q assetQuery, rows []assetRow, view listView) ([]snapshotRow, 
 	return tableRows, edit, found
 }
 
-// candidates lists the assets that s does not have yet, for the add form to suggest.
-func candidates(assets []Asset, s Snapshot) []Asset {
-	var out []Asset
-	for _, a := range assets {
-		if !slices.ContainsFunc(s.Items, func(it SnapshotItem) bool { return it.Asset.ID == a.ID }) {
-			out = append(out, a)
+// unusedSuggestions leaves out the names that s already has.
+func unusedSuggestions(suggestions []itemSuggestion, s Snapshot) []itemSuggestion {
+	var out []itemSuggestion
+	for _, sg := range suggestions {
+		if !slices.ContainsFunc(s.Items, func(it SnapshotItem) bool { return strings.EqualFold(it.Name, sg.Name) }) {
+			out = append(out, sg)
 		}
 	}
 	return out
@@ -208,26 +185,16 @@ func (h *handler) createItem(w http.ResponseWriter, r *http.Request) {
 		Amount:    r.PostFormValue("amount"),
 		Submitted: true,
 	}
-	assets, err := h.store.Assets(r.Context())
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	if a, ok := assetNamed(assets, form.Name); ok {
-		form.Type, form.Currency, form.Existing = a.Type, a.Currency, true
-	}
 	amount, ok := money.Parse(form.Currency, form.Amount)
 	if !ok {
 		form.Error = amountExample
 		h.renderList(w, r, http.StatusUnprocessableEntity, q, listView{Add: form})
 		return
 	}
-	err = h.store.AddItem(r.Context(), month, ItemInput{Name: form.Name, Type: form.Type, Currency: form.Currency, Amount: amount})
+	err := h.store.AddItem(r.Context(), month, ItemInput{Name: form.Name, Type: form.Type, Currency: form.Currency, Amount: amount})
 	switch {
 	case errors.Is(err, ErrInvalidItem):
 		form.Error = "Enter a name, type, and currency."
-	case errors.Is(err, ErrItemExists):
-		form.Error = fmt.Sprintf("%s is already in %s.", strings.TrimSpace(form.Name), month.Format("Jan 2006"))
 	case err != nil:
 		web.ServerError(w, r, err)
 		return
@@ -261,36 +228,25 @@ func (h *handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	assets, err := h.store.Assets(r.Context())
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	i := slices.IndexFunc(assets, func(a Asset) bool { return a.ID == id })
-	if i < 0 {
-		http.NotFound(w, r)
-		return
-	}
 	form := itemForm{
 		Name:      r.PostFormValue("name"),
 		Type:      AssetType(r.PostFormValue("type")),
+		Currency:  money.Currency(r.PostFormValue("currency")),
 		Amount:    r.PostFormValue("amount"),
 		Submitted: true,
 	}
 	view := listView{EditID: id}
-	amount, ok := money.Parse(assets[i].Currency, form.Amount)
+	amount, ok := money.Parse(form.Currency, form.Amount)
 	if !ok {
 		form.Error = amountExample
 		view.Edit = form
 		h.renderList(w, r, http.StatusUnprocessableEntity, q, view)
 		return
 	}
-	err = h.store.UpdateItem(r.Context(), month, id, ItemUpdate{Name: form.Name, Type: form.Type, Amount: amount})
+	err := h.store.UpdateItem(r.Context(), month, id, ItemInput{Name: form.Name, Type: form.Type, Currency: form.Currency, Amount: amount})
 	switch {
 	case errors.Is(err, ErrInvalidItem):
-		form.Error = "Enter a name and type."
-	case errors.Is(err, ErrNameTaken):
-		form.Error = fmt.Sprintf("Another asset is already named %s.", strings.TrimSpace(form.Name))
+		form.Error = "Enter a name, type, and currency."
 	case errors.Is(err, ErrItemNotFound):
 		http.NotFound(w, r)
 		return

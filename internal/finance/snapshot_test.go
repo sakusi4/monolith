@@ -19,17 +19,17 @@ func TestSnapshot_Totals(t *testing.T) {
 		{
 			name: "loans subtract from assets",
 			items: []SnapshotItem{
-				{Asset: Asset{Currency: money.USD}, Amount: 500000},
-				{Asset: Asset{Currency: money.KRW}, Amount: -1000000, PerUSD: krwRate},
+				{Currency: money.USD, Amount: 500000},
+				{Currency: money.KRW, Amount: -1000000, PerUSD: krwRate},
 			},
 			want: Totals{NetWorth: 400000, Loans: -100000},
 		},
 		{
 			name: "currencies without a rate are left out and reported once",
 			items: []SnapshotItem{
-				{Asset: Asset{Currency: money.USD}, Amount: 100},
-				{Asset: Asset{Currency: money.AED}, Amount: 100},
-				{Asset: Asset{Currency: money.AED}, Amount: 200},
+				{Currency: money.USD, Amount: 100},
+				{Currency: money.AED, Amount: 100},
+				{Currency: money.AED, Amount: 200},
 			},
 			want: Totals{NetWorth: 100, Missing: []money.Currency{money.AED}},
 		},
