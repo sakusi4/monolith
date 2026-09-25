@@ -1,0 +1,14 @@
+{{define "filters"}}
+<search>
+  <form method="get" id="filters" action="{{.Action}}" hx-boost="true">
+    {{range .Filters}}
+    <label>{{.Label}}
+      <select name="{{.Name}}">
+        {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    {{end}}
+    <button type="submit">Apply</button>
+  </form>
+</search>
+{{end}}

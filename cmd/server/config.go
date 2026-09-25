@@ -3,16 +3,22 @@ package main
 import (
 	"cmp"
 	"errors"
+	"fmt"
 	"os"
+	"time"
 )
 
-const defaultListenAddr = ":8080"
+const (
+	defaultListenAddr = ":8080"
+	defaultTimezone   = "UTC"
+)
 
 type config struct {
 	listenAddr    string
 	databaseURL   string
 	adminEmail    string
 	adminPassword string
+	location      *time.Location
 }
 
 func loadConfig() (config, error) {
@@ -28,5 +34,10 @@ func loadConfig() (config, error) {
 	if (cfg.adminEmail == "") != (cfg.adminPassword == "") {
 		return config{}, errors.New("ADMIN_EMAIL and ADMIN_PASSWORD must be set together")
 	}
+	loc, err := time.LoadLocation(cmp.Or(os.Getenv("TIMEZONE"), defaultTimezone))
+	if err != nil {
+		return config{}, fmt.Errorf("TIMEZONE: %w", err)
+	}
+	cfg.location = loc
 	return cfg, nil
 }

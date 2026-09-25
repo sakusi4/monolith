@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sakusi4/monolith/internal/auth"
 	"github.com/sakusi4/monolith/internal/postgres/postgrestest"
@@ -28,7 +29,7 @@ func newTestServer(t *testing.T) *testServer {
 	if err := auth.NewStore(db).SetUser(t.Context(), testEmail, testPassword); err != nil {
 		t.Fatal(err)
 	}
-	return &testServer{handler: routes(db), db: db}
+	return &testServer{handler: routes(db, time.UTC), db: db}
 }
 
 func (s *testServer) get(t *testing.T, path string, cookie *http.Cookie) *httptest.ResponseRecorder {

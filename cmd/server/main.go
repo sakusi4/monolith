@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/sakusi4/monolith/internal/auth"
+	"github.com/sakusi4/monolith/internal/finance"
 	"github.com/sakusi4/monolith/internal/postgres"
 )
 
@@ -20,6 +22,7 @@ const (
 	writeTimeout      = 30 * time.Second
 	idleTimeout       = 60 * time.Second
 	shutdownTimeout   = 10 * time.Second
+	ratesTimeout      = 10 * time.Second
 )
 
 func main() {
@@ -55,9 +58,17 @@ func run(ctx context.Context) error {
 		}
 	}
 
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	wg.Go(func() {
+		finance.RunRateUpdates(ctx, finance.NewStore(db), &http.Client{Timeout: ratesTimeout})
+	})
+
 	return serve(ctx, &http.Server{
 		Addr:              cfg.listenAddr,
-		Handler:           routes(db),
+		Handler:           routes(db, cfg.location),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

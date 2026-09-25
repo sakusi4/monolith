@@ -2,22 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{{block "title" .}}{{end}} · monolith</title>
   <link rel="stylesheet" href="/static/app.css">
+  {{block "head" .}}{{end}}
+  <script>document.documentElement.toggleAttribute("data-sidebar-collapsed", localStorage.getItem("sidebar-collapsed") === "1")</script>
 </head>
 <body>
   {{block "body" .}}
   <aside>
-    <a class="brand" href="/">monolith</a>
+    <header>
+      <span class="brand">monolith</span>
+      <button type="button" aria-label="Toggle sidebar" onclick="localStorage.setItem('sidebar-collapsed', document.documentElement.toggleAttribute('data-sidebar-collapsed') ? '1' : '')">«</button>
+    </header>
     <nav>
-      <a href="/finance/assets">Assets</a>
+      <a href="/dashboard"{{if current "/dashboard"}} aria-current="page"{{end}}>Dashboard</a>
+      <section>
+        <h2>Finance</h2>
+        <a href="/finance/snapshots"{{if current "/finance/snapshots" "/finance/assets"}} aria-current="page"{{end}}>Snapshots</a>
+      </section>
     </nav>
     <form method="post" action="/auth/logout">
       <button type="submit">Log out</button>
     </form>
   </aside>
-  <main>
+  <main hx-target="main" hx-select="main" hx-swap="outerHTML">
     {{template "content" .}}
   </main>
   {{end}}

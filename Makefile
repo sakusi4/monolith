@@ -16,7 +16,7 @@ dev: db
 	go run github.com/air-verse/air@v1.67.4 \
 		-build.cmd "go build -o tmp/server ./cmd/server" \
 		-build.entrypoint tmp/server \
-		-build.include_ext go,html,css,sql \
+		-build.include_ext go,html,css,js,sql \
 		-build.send_interrupt true
 
 test: db

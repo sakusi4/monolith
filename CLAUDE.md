@@ -36,7 +36,7 @@
 
 ```
 cmd/server/          실행 파일. 조립만 한다.
-internal/finance/    자산, 지출
+internal/finance/    자산 스냅샷, 지출
 internal/task/       목표, 프로젝트, 태스크
 internal/note/       메모, 태그, 링크
 internal/dashboard/  다른 기능 패키지를 읽어 대시보드를 만든다. 쓰기 없음.
@@ -78,7 +78,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 5. 화면은 서버에서 HTML로 그린다(3.6). JSON API를 만들지 않는다. 앱 밖의 클라이언트가 필요해지면 먼저 묻는다.
 6. 폼은 HTML `<form>`의 GET과 POST만 쓴다. 화면과 그 제출은 같은 URL이다: `GET /finance/assets/new`가 폼을 보여 주고 `POST /finance/assets/new`가 저장한다. 수정은 `/{id}/edit`, 삭제는 `POST /{id}/delete`다.
 7. POST가 성공하면 `303 See Other`로 GET 화면(목록 등)에 보낸다(Post/Redirect/Get). 성공한 POST 응답에 HTML을 바로 그리지 않는다.
-8. 폼 값은 `r.PostFormValue`로 읽고, 경계에서 한 번 파싱해 도메인 타입으로 바꾼다(2.3). 금액은 `money.ParseUSD`로 바꾼다.
+8. 폼 값은 `r.PostFormValue`로 읽고, 경계에서 한 번 파싱해 도메인 타입으로 바꾼다(2.3). 금액은 `money.Parse`로 바꾼다.
 9. 입력 검증은 입력 struct의 규칙 메서드(`AssetInput.Clean()`)가 하고, `Store`가 쓰기 전에 호출한다. 그래서 어느 경로로 들어와도 규칙을 거친다. 검증에 실패하면 422로 입력값과 영어 에러 문구를 담아 폼을 다시 그린다.
 10. 없는 리소스는 `http.NotFound`로 404다. 500은 `web.ServerError`로만 준다. 원인은 로그에만 남기고 화면에는 고정 문구를 보인다.
 11. `http.Server`는 `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`을 모두 설정한다.
@@ -98,20 +98,23 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 11. 스키마는 마이그레이션으로만 바꾼다. 마이그레이션은 `internal/postgres/migrations/`의 4자리 번호만으로 된 SQL 파일(`0001.sql`)이고 `//go:embed`로 바이너리에 넣는다. 서버 시작 시 적용되지 않은 파일을 번호 순서대로, 파일마다 트랜잭션 하나로 적용하고 `schema_version` 테이블에 기록한다. 외부 마이그레이션 도구(golang-migrate, goose)를 쓰지 않는다.
 12. `main`에 병합된 마이그레이션 파일은 수정하지 않는다. 바꿔야 하면 새 파일을 추가한다. down 마이그레이션을 만들지 않는다.
 
-### 3.5 원장
+### 3.5 자산 스냅샷
 
-1. 거래 하나를 이루는 분개(posting)는 DB 트랜잭션 하나로 기록하고, 차변과 대변이 맞는지 같은 트랜잭션 안에서 검증한다. 맞지 않으면 아무것도 기록하지 않는다.
-2. 잔액과 순자산은 분개에서 계산한다. 계산 결과를 저장하는 캐시 컬럼(`accounts.balance`)을 두지 않는다. 순자산 스냅샷은 과거 시점의 기록이므로 예외다.
+1. 자산의 금액은 사용자가 달마다 입력하는 스냅샷 값이다. 거래나 분개를 기록해 잔액을 계산하지 않는다.
+2. 부채는 음수로 저장한다. 순자산과 부채 합계는 그 달 스냅샷 항목의 USD 환산값으로 계산하고, 계산 결과를 저장하는 캐시 컬럼을 두지 않는다.
+3. 지출 관리는 스냅샷과 별개의 메뉴다. 지출 기록은 스냅샷 금액을 바꾸지 않는다.
+4. 자세한 설계는 `docs/superpowers/specs/2026-09-25-asset-snapshots-design.md`에 있고, 구현을 바꾸면 같이 고친다.
 
 ### 3.6 화면
 
 1. 화면은 `html/template`로 그린다. 템플릿은 `web/templates/`에 두고 `//go:embed`로 바이너리에 넣는다. 핸들러는 `web.Render(w, r, status, 페이지, 데이터)`로만 그린다.
-2. 모든 페이지는 `layout.html`(왼쪽 사이드바 + 본문)을 쓰고 `title`, `content`만 정의한다. 사이드바가 없는 페이지(로그인)는 `body` 블록 전체를 다시 정의한다. 빈 `{{define}}`은 기본 블록을 덮어쓰지 못하므로 블록을 비우는 방식으로 숨기지 않는다.
-3. 템플릿에는 표시만 둔다. 계산과 분기는 Go에서 끝내고 결과를 넘긴다. 금액은 템플릿 함수 `usd`로, 종류 이름은 타입의 메서드(`.Type.Label`)로 표시한다.
-4. 스타일은 직접 쓴 `web/static/app.css` 하나다. CSS 프레임워크를 쓰지 않는다. 글자 크기, 간격, 컨트롤 높이, 색은 `:root`의 변수에서만 정하고 규칙에서는 변수를 쓴다. 라이트와 다크는 `prefers-color-scheme`으로 변수만 바꾼다. 요소는 시맨틱 태그로 고르고, 클래스는 태그로 구분할 수 없는 곳(`.primary`, `.button`, `.danger`, `.num`, `.actions`)에만 쓴다. 인라인 `style`을 쓰지 않는다.
-5. JavaScript 프레임워크와 Node 빌드를 쓰지 않는다. 삭제 확인 같은 한 줄은 인라인 속성(`onsubmit="return confirm(...)"`)으로 쓴다. 페이지 일부만 바꿔야 하는 화면이 생기면 htmx를 `web/static/`에 넣기 전에 먼저 묻는다. 차트는 그 화면에만 순수 JS 라이브러리를 붙인다.
-6. 화면 문구는 영어로 템플릿과 핸들러에 바로 쓴다. 한국어를 쓰지 않는다. i18n을 쓰지 않는다.
-7. 클릭할 수 있는 것은 `<a>`나 `<button>`이다. 입력마다 `<label>`이 있다. 목록의 행마다 반복되는 버튼에는 대상 이름을 담은 `aria-label`을 단다. 페이지마다 `h1`은 하나다.
+2. 모든 페이지는 `layout.html`(왼쪽 사이드바 + 본문, 좁은 화면에서는 사이드바가 하단 탭 바가 된다)을 쓰고 `title`, `content`만 정의한다. 사이드바가 없는 페이지(로그인)는 `body` 블록 전체를 다시 정의한다. 빈 `{{define}}`은 기본 블록을 덮어쓰지 못하므로 블록을 비우는 방식으로 숨기지 않는다.
+3. 목록의 필터와 정렬은 URL 쿼리로 받는 GET 폼이다. 정렬은 `order`와 `direction`(Miniflux와 같다), 필터는 필드 이름을 파라미터로 쓴다. 값은 `web.ParseChoice`로 고정 목록에서 파싱하고, 비어 있으면 기본값, 목록 밖이면 400이다. 필터 막대는 `web.FilterBar`로 만들어 `{{template "filters" ...}}`로 그린다. 필터와 정렬 규칙은 기능 패키지의 `{목록}Query` 타입이 갖고 단위 테스트한다.
+4. 템플릿에는 표시만 둔다. 계산과 분기는 Go에서 끝내고 결과를 넘긴다. 금액은 템플릿 함수 `money`로, 종류 이름은 타입의 메서드(`.Type.Label`)로 표시한다.
+5. 스타일은 직접 쓴 `web/static/app.css` 하나다. CSS 프레임워크를 쓰지 않는다. 글자 크기, 간격, 컨트롤 높이, 색은 `:root`의 변수에서만 정하고 규칙에서는 변수를 쓴다. 라이트와 다크는 `prefers-color-scheme`으로 변수만 바꾼다. 요소는 시맨틱 태그로 고르고, 클래스는 태그로 구분할 수 없는 곳(`.primary`, `.button`, `.danger`, `.num`, `.actions`)에만 쓴다. 인라인 `style`을 쓰지 않는다.
+6. JavaScript 프레임워크와 Node 빌드를 쓰지 않는다. 삭제 확인 같은 한 줄은 인라인 속성(`onsubmit="return confirm(...)"`)으로 쓴다. 페이지 일부만 바꾸는 화면(목록에서 바로 추가·수정)은 htmx(`web/static/htmx-2.0.11.min.js`)를 그 화면의 `head` 블록에서 불러 쓴다. `layout.html`의 `<main>`에는 바꿔 끼우는 방식(`hx-target`, `hx-select`, `hx-swap`)만 있고, `hx-boost`는 같은 화면을 다시 그리는 요소(필터 폼, 표, 추가 폼)에만 건다. 다른 화면으로 가는 링크는 boost하지 않는다. 그러면 다른 화면은 항상 전체 페이지로 열려 그 화면의 스크립트가 순서대로 실행된다. 서버는 항상 전체 페이지를 그리고(성공은 303, 검증 실패는 422) JS 없이도 같은 URL로 동작한다. 행 수정은 `GET /{id}/edit`이 그 행만 입력칸으로 바꾼 목록을 그린다. 차트는 Chart.js를 쓰고 차트가 있는 화면에만 붙인다. 파일은 버전을 이름에 넣어 `web/static/`에 둔다(`chart-4.5.1.umd.min.js`). 데이터는 Go가 `<script type="application/json">`에 넣고, 화면별 스크립트(`web/static/dashboard.js`)가 읽어 그린다.
+7. 화면 문구는 영어로 템플릿과 핸들러에 바로 쓴다. 한국어를 쓰지 않는다. i18n을 쓰지 않는다.
+8. 클릭할 수 있는 것은 `<a>`나 `<button>`이다. 입력마다 `<label>`이 있다. 목록의 행마다 반복되는 버튼에는 대상 이름을 담은 `aria-label`을 단다. 페이지마다 `h1`은 하나다.
 
 ## 4. 에러 처리
 
@@ -119,7 +122,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 2. 실패를 `nil`, `false`, `-1`, 빈 문자열로 표현하지 않는다. `nil, nil`을 반환하지 않는다. "없음"이 정상 결과인 조회만 `(T, bool)`을 쓴다.
 3. 반환된 `error`는 전부 확인한다. `_`로 버리지 않는다. `defer rows.Close()`, `defer tx.Rollback()`처럼 표준 관용구로 인정되는 경우만 예외다.
 4. 에러는 처리하거나 반환하거나 둘 중 하나만 한다. 로그를 남기고 다시 반환하지 않는다.
-5. 위로 반환할 때는 하려던 일을 맥락으로 붙인다: `fmt.Errorf("insert posting: %w", err)`. `failed to`, `unable to`, `error` 같은 단어는 붙이지 않는다.
+5. 위로 반환할 때는 하려던 일을 맥락으로 붙인다: `fmt.Errorf("insert item: %w", err)`. `failed to`, `unable to`, `error` 같은 단어는 붙이지 않는다.
 6. 에러 문자열은 소문자로 시작하고 마침표로 끝내지 않는다.
 7. 호출자가 분기해야 하는 에러만 식별 가능하게 만든다. 값이면 `var ErrNotFound = errors.New(...)`, 데이터를 실어야 하면 `type ValidationError struct`. 에러는 그것을 반환하는 패키지에 정의한다. 분기하는 호출자가 없으면 `fmt.Errorf`로 충분하다. 미리 만들어두지 않는다.
 8. 에러 비교는 `errors.Is`, `errors.As`로만 한다. `==` 비교와 문자열 매칭 금지.
@@ -130,7 +133,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 
 1. 블로킹되거나 I/O를 하는 함수는 첫 인자로 `ctx context.Context`를 받는다. `context`를 struct 필드에 저장하지 않는다. 핸들러는 `r.Context()`를 넘긴다.
 2. goroutine을 시작하는 코드가 그 종료를 책임진다. 종료 경로(ctx 취소, 채널 close)가 없는 goroutine을 만들지 않고, 시작한 쪽이 종료를 기다린다. 핸들러 안에서 응답보다 오래 사는 goroutine을 띄우지 않는다.
-3. 주기 작업(순자산 스냅샷, 시세 갱신)은 `run`이 시작하는 goroutine에서 `time.Timer`/`time.Ticker` 루프로 돌리고 ctx 취소로 끝낸다. cron 라이브러리를 쓰지 않는다.
+3. 주기 작업(환율 수집)은 `run`이 시작하는 goroutine에서 `time.Timer`/`time.Ticker` 루프로 돌리고 ctx 취소로 끝낸다. cron 라이브러리를 쓰지 않는다.
 4. 여러 goroutine이 공유하는 상태는 `sync.Mutex` 또는 채널로 보호한다. mutex는 보호하는 필드 바로 위에 둔다.
 5. 자원은 획득 직후 `defer`로 해제를 예약한다. `resp.Body`는 반드시 닫는다.
 6. 타임아웃 없는 네트워크 호출을 하지 않는다. 외부 API는 `Timeout`이 설정된 `*http.Client`를 생성자로 받아 호출한다. `http.DefaultClient`를 쓰지 않는다.
@@ -167,9 +170,9 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 | 에러 타입 | `Error` 접미 | `ValidationError` |
 | 생성자 | `New` 또는 `NewX` | `finance.NewStore` |
 | 핸들러 메서드 | 동사 + 리소스, 접미사 없음 | `func (h *handler) createAsset` |
-| 템플릿 | `{주제}_{화면}.html` | `asset_list.html`, `asset_form.html` |
+| 템플릿 | `{주제}_{화면}.html`. 여러 페이지가 쓰는 조각은 `_` 접두 | `asset_list.html`, `_filters.html` |
 | receiver | 타입명 앞 1~2글자, 타입 안에서 통일 | `func (s *Store)` |
-| 테이블, 컬럼 | snake_case, 테이블은 복수형 | `postings.account_id` |
+| 테이블, 컬럼 | snake_case, 테이블은 복수형 | `snapshot_items.asset_id` |
 | 마이그레이션 | 4자리 번호만. 1씩 증가, 설명을 붙이지 않는다 | `0003.sql` |
 
 1. 이름에 패키지명을 반복하지 않는다. 호출부에서 `패키지.이름`으로 읽힌다. `finance.Asset`(O), `finance.FinanceAsset`(X).
@@ -204,7 +207,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
    - **로직 단위 테스트**: 직접 짠 분기, 계산, 파서, 검증 규칙(3.1.3의 규칙 함수). DB와 HTTP 없이, 대상과 같은 패키지에서 테스트한다.
    - **HTTP 통합 테스트**: `cmd/server/{기능}_test.go`에서 `routes()` 전체에 실제 DB로 `httptest` 요청(폼 POST 포함)을 보내 기능의 사용자 흐름을 따라간다. 상태 코드, 리다이렉트 위치, HTML 본문에 기대한 문구가 있는지 확인한다.
 2. `Store` 메서드, 마이그레이션, 설정 읽기, 라우트 배선은 따로 테스트하지 않는다. SQL과 템플릿은 HTTP 통합 테스트가 지나가며 검증한다. 배선과 설정이 틀리면 서버가 시작하지 않거나 첫 요청에서 드러난다.
-3. 틀려도 겉으로 드러나지 않는 동작(세션 만료, 권한, 금액 계산, 복식부기 균형)은 둘 중 한 테스트에 반드시 있어야 한다. 같은 동작을 두 테스트에서 중복으로 확인하지 않는다.
+3. 틀려도 겉으로 드러나지 않는 동작(세션 만료, 권한, 금액 계산, 환율 환산)은 둘 중 한 테스트에 반드시 있어야 한다. 같은 동작을 두 테스트에서 중복으로 확인하지 않는다.
 4. 테스트는 대상과 같은 디렉터리의 `_test.go` 파일에 둔다. 별도 `tests/` 디렉터리를 만들지 않는다.
 5. 테스트 함수명은 `Test{Func}`, `Test{Type}_{Method}`, `Test{기능}`(`TestFinance`)이다. 조건과 기대결과는 서브테스트 이름에 영어로 적는다: `t.Run("expired session redirects to login", ...)`.
 6. 같은 함수의 케이스가 둘 이상이면 table-driven으로 쓴다.
@@ -212,7 +215,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 8. `time.Sleep`으로 동기화하지 않는다. 채널이나 `context`로 기다린다. 날짜 경계 계산처럼 현재 시각을 쓰는 로직은 `now time.Time`을 인자로 받아 테스트하고, 타이머와 주기 작업은 `testing/synctest`로 테스트한다. 가짜 시계 인터페이스를 만들지 않는다.
 9. DB는 실제 PostgreSQL을 쓴다. DB를 mock하거나 인터페이스로 가리지 않는다. sqlmock을 쓰지 않는다.
 10. 테스트 헬퍼는 첫 줄에서 `t.Helper()`를 호출한다. 정리는 `t.Cleanup`, 임시 파일은 `t.TempDir()`, ctx는 `t.Context()`, 픽스처 파일은 `testdata/`를 쓴다.
-11. 외부 HTTP(시세, 환율 API)는 `httptest.NewServer`로 대체한다. 실제 외부 호출 금지.
+11. 외부 HTTP(환율 API)는 `httptest.NewServer`로 대체한다. 실제 외부 호출 금지.
 12. HTTP 통합 테스트는 `postgrestest.New(t)`로 테스트마다 마이그레이션이 적용된 새 DB를 만들어 쓴다. 테스트끼리 데이터를 공유하지 않는다.
 13. `TEST_DATABASE_URL`이 비어 있으면 DB 테스트는 `t.Skip`한다. 10절의 검사는 이 값을 설정하고 실행하므로 거기서는 건너뛰는 테스트가 없어야 한다.
 

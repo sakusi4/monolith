@@ -11,7 +11,7 @@ func TestAuth(t *testing.T) {
 	s := newTestServer(t)
 
 	t.Run("pages redirect to login without a session", func(t *testing.T) {
-		wantRedirect(t, s.get(t, "/finance/assets", nil), "/auth/login")
+		wantRedirect(t, s.get(t, "/finance/snapshots", nil), "/auth/login")
 	})
 
 	t.Run("wrong password shows the form again", func(t *testing.T) {
@@ -28,15 +28,15 @@ func TestAuth(t *testing.T) {
 		if !session.HttpOnly || !session.Secure {
 			t.Errorf("session cookie HttpOnly=%v Secure=%v, want both true", session.HttpOnly, session.Secure)
 		}
-		if rec := s.get(t, "/finance/assets", session); rec.Code != http.StatusOK {
-			t.Errorf("GET /finance/assets with session = %d, want 200", rec.Code)
+		if rec := s.get(t, "/finance/snapshots", session); rec.Code != http.StatusOK {
+			t.Errorf("GET /finance/snapshots with session = %d, want 200", rec.Code)
 		}
 	})
 
 	t.Run("logout ends the session", func(t *testing.T) {
 		session := s.login(t)
 		wantRedirect(t, s.post(t, "/auth/logout", nil, session), "/auth/login")
-		wantRedirect(t, s.get(t, "/finance/assets", session), "/auth/login")
+		wantRedirect(t, s.get(t, "/finance/snapshots", session), "/auth/login")
 	})
 
 	t.Run("expired session redirects to login", func(t *testing.T) {
@@ -44,6 +44,6 @@ func TestAuth(t *testing.T) {
 		if _, err := s.db.ExecContext(t.Context(), `UPDATE sessions SET expires_at = now() - interval '1 second'`); err != nil {
 			t.Fatal(err)
 		}
-		wantRedirect(t, s.get(t, "/finance/assets", session), "/auth/login")
+		wantRedirect(t, s.get(t, "/finance/snapshots", session), "/auth/login")
 	})
 }

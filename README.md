@@ -9,7 +9,7 @@ make dev   # 파일을 저장하면 자동으로 다시 빌드하고 재시작�
 make run   # 한 번만 실행
 ```
 
-http://localhost:8080 을 열고 `admin@localhost` / `admin`으로 로그인한다. `make dev`로 띄웠으면 `.go`, `.html`, `.css`, `.sql`을 저장한 뒤 브라우저만 새로고침하면 된다.
+http://localhost:8080 을 열고 `admin@localhost` / `admin`으로 로그인한다. `make dev`로 띄웠으면 `.go`, `.html`, `.css`, `.js`, `.sql`을 저장한 뒤 브라우저만 새로고침하면 된다.
 
 ### 단일 바이너리
 
@@ -27,6 +27,7 @@ ADMIN_EMAIL=me@example.com ADMIN_PASSWORD='...' ./bin/server
 | `DATABASE_URL` | 없음(필수) | Postgres 접속 URL |
 | `LISTEN_ADDR` | `:8080` | 서버 주소 |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | 없음 | 로그인 계정. 시작할 때 이 계정을 만들거나 비밀번호를 바꾼다. 둘 다 주거나 둘 다 뺀다 |
+| `TIMEZONE` | `UTC` | "이번 달"을 정하는 시간대(IANA 이름, 예: `Asia/Dubai`) |
 
 DB 끄기: `docker compose down` (데이터까지 지우려면 `-v`)
 
