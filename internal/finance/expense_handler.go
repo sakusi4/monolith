@@ -17,9 +17,12 @@ type expenseListPage struct {
 	Chart       spendingChart
 	Month       time.Time
 	MonthOpts   web.Filter
+	HasExpenses bool
 	Summary     expenseSummary
 	Rates       []appliedRate
+	Filters     web.FilterBar
 	Rows        []expenseListRow
+	Pager       expensePager
 	Edit        itemForm
 	Add         itemForm
 	Suggestions []expenseSuggestion
@@ -38,24 +41,21 @@ type expenseListRow struct {
 }
 
 func (h *handler) listExpenses(w http.ResponseWriter, r *http.Request) {
-	var month time.Time
-	if v := r.URL.Query().Get("month"); v != "" {
-		m, err := time.Parse(monthLayout, v)
-		if err != nil {
-			http.Error(w, "Invalid month.", http.StatusBadRequest)
-			return
-		}
-		month = m
+	q, err := parseExpenseQuery(r.URL.Query())
+	if err != nil {
+		http.Error(w, "Invalid filter.", http.StatusBadRequest)
+		return
 	}
-	h.renderExpenses(w, r, http.StatusOK, month, listView{})
+	h.renderExpenses(w, r, http.StatusOK, q, listView{})
 }
 
-// renderExpenses shows month's expenses, or the current month's when month is zero.
-func (h *handler) renderExpenses(w http.ResponseWriter, r *http.Request, status int, month time.Time, view listView) {
+// renderExpenses shows the expenses of q.Month, or of the current month when it is zero.
+func (h *handler) renderExpenses(w http.ResponseWriter, r *http.Request, status int, q expenseQuery, view listView) {
 	months := h.months()
-	if month.IsZero() {
-		month = months[0]
+	if q.Month.IsZero() {
+		q.Month = months[0]
 	}
+	month := q.Month
 	if !slices.ContainsFunc(months, month.Equal) {
 		http.NotFound(w, r)
 		return
@@ -70,7 +70,7 @@ func (h *handler) renderExpenses(w http.ResponseWriter, r *http.Request, status 
 		web.ServerError(w, r, err)
 		return
 	}
-	page, ok := newExpenseListPage(month, months, suggestions, expenses, defaultExpenseDate(time.Now(), h.loc, month), view)
+	page, ok := newExpenseListPage(q, months, suggestions, expenses, defaultExpenseDate(time.Now(), h.loc, month), view)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -85,17 +85,22 @@ func (h *handler) renderExpenses(w http.ResponseWriter, r *http.Request, status 
 }
 
 // newExpenseListPage starts the add form on date unless view has the user's input.
-// It returns false when view edits an expense that is not in month.
-func newExpenseListPage(month time.Time, months []time.Time, suggestions []expenseSuggestion, expenses []Expense, date time.Time, view listView) (expenseListPage, bool) {
-	rows := expenseRows(expenses)
-	tableRows, edit, ok := editableExpenseRows(month, rows, view)
+// It returns false when view edits an expense that is not on the page shown.
+func newExpenseListPage(q expenseQuery, months []time.Time, suggestions []expenseSuggestion, expenses []Expense, date time.Time, view listView) (expenseListPage, bool) {
+	month := q.Month
+	matching := q.matching(expenses)
+	rows, pager := q.paginate(q.sort(expenseRows(matching)))
+	tableRows, edit, ok := editableExpenseRows(q, rows, view)
 	if !ok {
 		return expenseListPage{}, false
 	}
 	page := expenseListPage{
 		Month:       month,
 		MonthOpts:   monthFilter(months, month),
+		HasExpenses: len(expenses) > 0,
+		Filters:     web.FilterBar{Action: "/finance/expenses", Filters: q.filters()},
 		Rows:        tableRows,
+		Pager:       pager,
 		Edit:        edit,
 		Add:         view.Add,
 		Suggestions: unusedExpenseSuggestions(suggestions, expenses),
@@ -105,13 +110,13 @@ func newExpenseListPage(month time.Time, months []time.Time, suggestions []expen
 		Currencies:  money.Currencies,
 		Error:       view.Error,
 	}
-	page.Add.URL = expenseURL(month, "items/new")
+	page.Add.URL = q.itemURL(month, "items/new")
 	if !page.Add.Submitted {
 		page.Add.Date = date.Format(time.DateOnly)
 	}
 	if len(expenses) > 0 {
-		page.Summary = summarizeExpenses(expenses)
-		page.Rates = appliedRates(month, expenseRates(expenses))
+		page.Summary = summarizeExpenses(matching)
+		page.Rates = appliedRates(month, expenseRates(matching))
 	}
 	return page, true
 }
@@ -119,7 +124,7 @@ func newExpenseListPage(month time.Time, months []time.Time, suggestions []expen
 // editableExpenseRows adds the row actions to rows and returns the form of the row that view
 // edits: the input the user submitted, or else the row's current values. It returns false when
 // view edits an expense that is not in rows.
-func editableExpenseRows(month time.Time, rows []expenseRow, view listView) ([]expenseListRow, itemForm, bool) {
+func editableExpenseRows(q expenseQuery, rows []expenseRow, view listView) ([]expenseListRow, itemForm, bool) {
 	var tableRows []expenseListRow
 	edit := view.Edit
 	found := view.EditID == 0
@@ -129,15 +134,15 @@ func editableExpenseRows(month time.Time, rows []expenseRow, view listView) ([]e
 		lr := expenseListRow{
 			Row:       row,
 			Editing:   e.ID == view.EditID,
-			EditURL:   expenseURL(month, "items/"+id+"/edit"),
-			DeleteURL: expenseURL(month, "items/"+id+"/delete"),
+			EditURL:   q.itemURL(q.Month, "items/"+id+"/edit"),
+			DeleteURL: q.itemURL(q.Month, "items/"+id+"/delete"),
 		}
 		if lr.Editing {
 			found = true
 			if !edit.Submitted {
 				edit = itemForm{Date: e.Date.Format(time.DateOnly), Name: e.Name, Category: e.Category, Currency: e.Currency, Amount: money.Input(e.Currency, e.Amount)}
 			}
-			edit.URL, edit.CancelURL = lr.EditURL, expenseListURL(month)
+			edit.URL, edit.CancelURL = lr.EditURL, q.listURL(q.Month)
 		}
 		tableRows = append(tableRows, lr)
 	}
@@ -156,7 +161,7 @@ func unusedExpenseSuggestions(suggestions []expenseSuggestion, expenses []Expens
 }
 
 func (h *handler) createExpense(w http.ResponseWriter, r *http.Request) {
-	month, ok := h.expenseRequest(w, r)
+	q, month, ok := h.expenseRequest(w, r)
 	if !ok {
 		return
 	}
@@ -171,7 +176,7 @@ func (h *handler) createExpense(w http.ResponseWriter, r *http.Request) {
 	in, problem := expenseInput(form, month)
 	if problem != "" {
 		form.Error = problem
-		h.renderExpenses(w, r, http.StatusUnprocessableEntity, month, listView{Add: form})
+		h.renderExpenses(w, r, http.StatusUnprocessableEntity, q, listView{Add: form})
 		return
 	}
 	err := h.store.AddExpense(r.Context(), in)
@@ -182,14 +187,14 @@ func (h *handler) createExpense(w http.ResponseWriter, r *http.Request) {
 		web.ServerError(w, r, err)
 		return
 	default:
-		http.Redirect(w, r, expenseListURL(month), http.StatusSeeOther)
+		http.Redirect(w, r, q.listURL(month), http.StatusSeeOther)
 		return
 	}
-	h.renderExpenses(w, r, http.StatusUnprocessableEntity, month, listView{Add: form})
+	h.renderExpenses(w, r, http.StatusUnprocessableEntity, q, listView{Add: form})
 }
 
 func (h *handler) editExpense(w http.ResponseWriter, r *http.Request) {
-	month, ok := h.expenseRequest(w, r)
+	q, _, ok := h.expenseRequest(w, r)
 	if !ok {
 		return
 	}
@@ -198,11 +203,11 @@ func (h *handler) editExpense(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.renderExpenses(w, r, http.StatusOK, month, listView{EditID: id})
+	h.renderExpenses(w, r, http.StatusOK, q, listView{EditID: id})
 }
 
 func (h *handler) updateExpense(w http.ResponseWriter, r *http.Request) {
-	month, ok := h.expenseRequest(w, r)
+	q, month, ok := h.expenseRequest(w, r)
 	if !ok {
 		return
 	}
@@ -224,7 +229,7 @@ func (h *handler) updateExpense(w http.ResponseWriter, r *http.Request) {
 	if problem != "" {
 		form.Error = problem
 		view.Edit = form
-		h.renderExpenses(w, r, http.StatusUnprocessableEntity, month, view)
+		h.renderExpenses(w, r, http.StatusUnprocessableEntity, q, view)
 		return
 	}
 	err := h.store.UpdateExpense(r.Context(), month, id, in)
@@ -238,15 +243,15 @@ func (h *handler) updateExpense(w http.ResponseWriter, r *http.Request) {
 		web.ServerError(w, r, err)
 		return
 	default:
-		http.Redirect(w, r, expenseListURL(month), http.StatusSeeOther)
+		http.Redirect(w, r, q.listURL(month), http.StatusSeeOther)
 		return
 	}
 	view.Edit = form
-	h.renderExpenses(w, r, http.StatusUnprocessableEntity, month, view)
+	h.renderExpenses(w, r, http.StatusUnprocessableEntity, q, view)
 }
 
 func (h *handler) deleteExpense(w http.ResponseWriter, r *http.Request) {
-	month, ok := h.expenseRequest(w, r)
+	q, month, ok := h.expenseRequest(w, r)
 	if !ok {
 		return
 	}
@@ -262,7 +267,7 @@ func (h *handler) deleteExpense(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		web.ServerError(w, r, err)
 	default:
-		http.Redirect(w, r, expenseListURL(month), http.StatusSeeOther)
+		http.Redirect(w, r, q.listURL(month), http.StatusSeeOther)
 	}
 }
 
@@ -280,21 +285,19 @@ func expenseInput(form itemForm, month time.Time) (ExpenseInput, string) {
 	return ExpenseInput{Date: date, Name: form.Name, Category: form.Category, Currency: form.Currency, Amount: amount}, ""
 }
 
-// expenseRequest reads the month of a request on a month's expenses.
-// It writes a 404 response and returns false when the month is invalid.
-func (h *handler) expenseRequest(w http.ResponseWriter, r *http.Request) (time.Time, bool) {
+// expenseRequest reads the list filters and the month of a request on a month's expenses.
+// It writes the error response and returns false when either is invalid.
+func (h *handler) expenseRequest(w http.ResponseWriter, r *http.Request) (expenseQuery, time.Time, bool) {
+	q, err := parseExpenseQuery(r.URL.Query())
+	if err != nil {
+		http.Error(w, "Invalid filter.", http.StatusBadRequest)
+		return expenseQuery{}, time.Time{}, false
+	}
 	month, err := time.Parse(monthLayout, r.PathValue("month"))
 	if err != nil || !h.hasMonth(month) {
 		http.NotFound(w, r)
-		return time.Time{}, false
+		return expenseQuery{}, time.Time{}, false
 	}
-	return month, true
-}
-
-func expenseListURL(month time.Time) string {
-	return "/finance/expenses?month=" + month.Format(monthLayout)
-}
-
-func expenseURL(month time.Time, action string) string {
-	return "/finance/expenses/" + month.Format(monthLayout) + "/" + action
+	q.Month = month
+	return q, month, true
 }

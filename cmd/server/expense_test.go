@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -38,7 +39,7 @@ func TestExpenses(t *testing.T) {
 		t.Helper()
 		month := date[:len("2006-01")]
 		form := url.Values{"date": {date}, "name": {name}, "category": {category}, "currency": {currency}, "amount": {amount}}
-		wantRedirect(t, s.post(t, "/finance/expenses/"+month+"/items/new", form, session), "/finance/expenses?month="+month)
+		wantRedirect(t, s.post(t, "/finance/expenses/"+month+"/items/new", form, session), "/finance/expenses?direction=desc&month="+month+"&order=date")
 	}
 	expenseID := func(t *testing.T, month, name, currency string) string {
 		t.Helper()
@@ -101,7 +102,7 @@ func TestExpenses(t *testing.T) {
 		id := expenseID(t, "2025-04", "Groceries", "AED")
 		edit := "/finance/expenses/2025-04/items/" + id + "/edit"
 		wantContains(t, edit, `value="40.00"`, `value="Groceries"`, `<option value="food" selected>`, `value="2025-04-09"`)
-		wantRedirect(t, s.post(t, edit, url.Values{"date": {"2025-04-30"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"12.00"}}, session), "/finance/expenses?month=2025-04")
+		wantRedirect(t, s.post(t, edit, url.Values{"date": {"2025-04-30"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"12.00"}}, session), "/finance/expenses?direction=desc&month=2025-04&order=date")
 		wantContains(t, "/finance/expenses?month=2025-04", "Dining", "<td>Travel</td>", "<td>Apr 30</td>", "USD 12.00")
 		wantStatus(t, edit, url.Values{"date": {"2025-05-01"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"12.00"}}, http.StatusUnprocessableEntity)
 		wantContains(t, "/finance/expenses?month=2025-02", "AED 40.00")
@@ -116,12 +117,33 @@ func TestExpenses(t *testing.T) {
 	t.Run("delete removes only the row", func(t *testing.T) {
 		id := expenseID(t, "2025-04", "Dining", "USD")
 		del := "/finance/expenses/2025-04/items/" + id + "/delete"
-		wantRedirect(t, s.post(t, del, nil, session), "/finance/expenses?month=2025-04")
+		wantRedirect(t, s.post(t, del, nil, session), "/finance/expenses?direction=desc&month=2025-04&order=date")
 		got := body(t, "/finance/expenses?month=2025-04")
 		if strings.Contains(got, "Dining") || !strings.Contains(got, "KRW 100,000") {
 			t.Errorf("GET 2025-04 after delete still shows Dining or lost the other row:\n%s", got)
 		}
 		wantStatus(t, del, nil, http.StatusNotFound)
+	})
+
+	t.Run("a month shows 20 rows a page, and filters narrow the rows and the total", func(t *testing.T) {
+		if _, err := s.db.ExecContext(t.Context(), `
+			INSERT INTO expenses (spent_on, name, category, currency, amount)
+			SELECT '2025-06-01'::date + (i - 1), 'Meal ' || i, 'food', 'USD', i * 100 FROM generate_series(1, 24) i
+			UNION ALL SELECT '2025-06-30', 'Flight', 'travel', 'USD', 50000`); err != nil {
+			t.Fatal(err)
+		}
+		list := "/finance/expenses?direction=desc&month=2025-06&order=date"
+		first := body(t, list)
+		if !strings.Contains(first, "1–20 of 25") || !strings.Contains(first, `href="`+html.EscapeString(list+"&page=2")+`"`) || strings.Contains(first, "<td>Meal 5</td>") {
+			t.Errorf("GET %s is not the first 20 of 25 rows with a link to page 2:\n%s", list, first)
+		}
+		wantContains(t, list+"&page=2", "21–25 of 25", "<td>Meal 5</td>", "<td>Meal 1</td>")
+		travel := body(t, "/finance/expenses?month=2025-06&category=travel")
+		if !strings.Contains(travel, "<td>Flight</td>") || strings.Contains(travel, "<td>Meal 24</td>") || !strings.Contains(travel, "<strong>USD 500.00</strong>") {
+			t.Errorf("travel filter does not show only Flight with its total:\n%s", travel)
+		}
+		del := "/finance/expenses/2025-06/items/" + expenseID(t, "2025-06", "Flight", "USD") + "/delete?category=travel&direction=desc&order=date&page=2"
+		wantRedirect(t, s.post(t, del, nil, session), "/finance/expenses?category=travel&direction=desc&month=2025-06&order=date&page=2")
 	})
 
 	t.Run("months outside the range are rejected", func(t *testing.T) {

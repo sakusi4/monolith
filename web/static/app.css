@@ -220,10 +220,6 @@ main > article > header label {
   font-weight: 400;
 }
 
-main > article > header form {
-  margin-right: auto;
-}
-
 main > header h1 {
   margin: 0;
 }
@@ -320,6 +316,19 @@ dd strong {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+main nav {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  margin-top: var(--space-m);
+  font-size: var(--size-small);
+}
+
+main nav p {
+  margin: 0 auto 0 0;
+  color: var(--muted);
 }
 
 main > footer {
