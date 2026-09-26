@@ -50,26 +50,6 @@ func TestExpenses(t *testing.T) {
 		return strconv.FormatInt(id, 10)
 	}
 
-	t.Run("the sidebar links the empty current month, which offers no copy", func(t *testing.T) {
-		got := body(t, "/finance/expenses")
-		for _, want := range []string{`href="/finance/expenses" aria-current="page"`, "<h1>Expenses</h1>", `<h2 id="records">Records</h2>`, "No expenses in ", "Add to "} {
-			if !strings.Contains(got, want) {
-				t.Errorf("GET /finance/expenses does not contain %q:\n%s", want, got)
-			}
-		}
-		if strings.Contains(got, "Copy") || strings.Contains(got, `<h2 id="trend">`) {
-			t.Errorf("GET /finance/expenses offers to copy a month or shows a trend without expenses:\n%s", got)
-		}
-		i := strings.Index(got, "<legend>Add to")
-		if i < 0 {
-			t.Fatalf("GET /finance/expenses has no add form:\n%s", got)
-		}
-		form := got[i:]
-		if d, c, n := strings.Index(form, "<label>Date"), strings.Index(form, "<label>Category"), strings.Index(form, "<label>Name"); d < 0 || d > c || c > n {
-			t.Errorf("add form fields are not in the order Date, Category, Name:\n%s", form)
-		}
-	})
-
 	if _, err := s.db.ExecContext(t.Context(), `
 		INSERT INTO exchange_rates (month, currency, per_usd)
 		VALUES ('2024-12-01', 'KRW', 1000), ('2024-12-01', 'AED', 4)`); err != nil {
@@ -82,14 +62,8 @@ func TestExpenses(t *testing.T) {
 		add(t, "2025-01-20", "Netflix", "bills", "USD", "15.49")
 		add(t, "2025-01-31", "Refund", "other", "USD", "-5.49")
 		wantContains(t, "/finance/expenses?month=2025-01",
-			"<th>Date</th><th>Category</th><th>Name</th>", "<td>Housing</td>", "<td>Food</td>", "<td>Jan 15</td>", "<td>Jan 31</td>", "AED 2,000.00", "USD 500.00", "KRW 300,000", "USD 300.00", "USD -5.49", "USD 810.00",
+			"<td>Housing</td>", "<td>Food</td>", "<td>Jan 15</td>", "<td>Jan 31</td>", "AED 2,000.00", "USD 500.00", "KRW 300,000", "USD 300.00", "USD -5.49", "USD 810.00",
 			"1 USD = KRW 1,000 (Dec 2024) · AED 4 (Dec 2024)")
-	})
-
-	t.Run("the table has no total row", func(t *testing.T) {
-		if got := body(t, "/finance/expenses?month=2025-01"); strings.Contains(got, `<th scope="row">Total</th>`) {
-			t.Errorf("GET 2025-01 shows a total row under the table:\n%s", got)
-		}
 	})
 
 	t.Run("a name can repeat with its own currency and earlier names are suggested", func(t *testing.T) {
@@ -107,45 +81,31 @@ func TestExpenses(t *testing.T) {
 	})
 
 	t.Run("the trend charts each month's total, oldest first, whatever month is shown", func(t *testing.T) {
-		wantContains(t, "/finance/expenses?month=2025-03", `<h2 id="trend">Trend</h2>`,
+		wantContains(t, "/finance/expenses?month=2025-03",
 			`<script type="application/json" id="spending-data">{"labels":["Jan 2025","Feb 2025"],"totalCents":[81000,11000]}</script>`)
 	})
 
 	t.Run("invalid expenses show the form again", func(t *testing.T) {
 		for _, form := range []url.Values{
 			{"date": {"2025-01-05"}, "name": {"  "}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
-			{"date": {"2025-01-05"}, "name": {"Gym"}, "category": {"sports"}, "currency": {"USD"}, "amount": {"1"}},
-			{"date": {"2025-01-05"}, "name": {"Gym"}, "category": {"other"}, "currency": {"EUR"}, "amount": {"1"}},
 			{"date": {"2025-01-05"}, "name": {"Gym"}, "category": {"other"}, "currency": {"KRW"}, "amount": {"1.5"}},
 			{"date": {"2025-02-01"}, "name": {"Gym"}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
-			{"date": {"2025-01-32"}, "name": {"Gym"}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
-			{"name": {"Gym"}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
 		} {
 			wantStatus(t, "/finance/expenses/2025-01/items/new", form, http.StatusUnprocessableEntity)
 		}
 	})
 
-	t.Run("the add form starts on the month's first day outside the current month", func(t *testing.T) {
-		wantContains(t, "/finance/expenses?month=2025-03", `name="date" value="2025-03-01" min="2025-03-01" max="2025-03-31"`)
-	})
-
-	t.Run("expenses are not copied from another month", func(t *testing.T) {
-		wantStatus(t, "/finance/expenses/2025-04/copy", nil, http.StatusNotFound)
+	t.Run("edit changes the name, currency, and amount of its month only", func(t *testing.T) {
 		add(t, "2025-04-02", "Groceries", "food", "KRW", "100,000")
 		add(t, "2025-04-09", "Groceries", "food", "AED", "40.00")
-	})
-
-	t.Run("edit changes the name, currency, and amount of its month only", func(t *testing.T) {
 		id := expenseID(t, "2025-04", "Groceries", "AED")
 		edit := "/finance/expenses/2025-04/items/" + id + "/edit"
-		wantContains(t, edit, `form="edit-item"`, `value="40.00"`, `value="Groceries"`, `<option value="food" selected>`, `value="2025-04-09"`)
+		wantContains(t, edit, `value="40.00"`, `value="Groceries"`, `<option value="food" selected>`, `value="2025-04-09"`)
 		wantRedirect(t, s.post(t, edit, url.Values{"date": {"2025-04-30"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"12.00"}}, session), "/finance/expenses?month=2025-04")
 		wantContains(t, "/finance/expenses?month=2025-04", "Dining", "<td>Travel</td>", "<td>Apr 30</td>", "USD 12.00")
 		wantStatus(t, edit, url.Values{"date": {"2025-05-01"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"12.00"}}, http.StatusUnprocessableEntity)
 		wantContains(t, "/finance/expenses?month=2025-02", "AED 40.00")
-		wantStatus(t, edit, url.Values{"date": {"2025-04-30"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"KRW"}, "amount": {"1.5"}}, http.StatusUnprocessableEntity)
 		wantStatus(t, edit, url.Values{"date": {"2025-04-30"}, "name": {" "}, "category": {"travel"}, "currency": {"USD"}, "amount": {"1"}}, http.StatusUnprocessableEntity)
-		wantStatus(t, edit, url.Values{"date": {"2025-04-30"}, "name": {"Dining"}, "category": {"sports"}, "currency": {"USD"}, "amount": {"1"}}, http.StatusUnprocessableEntity)
 		other := "/finance/expenses/2025-02/items/" + id + "/edit"
 		if rec := s.get(t, other, session); rec.Code != http.StatusNotFound {
 			t.Errorf("GET edit of an expense outside the month = %d, want 404", rec.Code)

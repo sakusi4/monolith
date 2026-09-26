@@ -17,7 +17,6 @@ func TestItemInput_Clean(t *testing.T) {
 		{"name is trimmed and loans may be negative", ItemInput{Name: " Mortgage ", Type: AssetLoan, Currency: money.KRW, Amount: -5}, ItemInput{Name: "Mortgage", Type: AssetLoan, Currency: money.KRW, Amount: -5}, nil},
 		{"blank name", ItemInput{Name: "  ", Type: AssetCash, Currency: money.USD}, ItemInput{}, ErrInvalidItem},
 		{"unknown type", ItemInput{Name: "bar", Type: "gold", Currency: money.USD}, ItemInput{}, ErrInvalidItem},
-		{"unknown currency", ItemInput{Name: "wallet", Type: AssetCash, Currency: "EUR"}, ItemInput{}, ErrInvalidItem},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

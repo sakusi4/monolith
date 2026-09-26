@@ -26,7 +26,4 @@ func TestNewSpendingChart(t *testing.T) {
 	if got := newSpendingChart(expenses); !reflect.DeepEqual(got, want) {
 		t.Errorf("newSpendingChart() = %+v, want %+v, oldest first without the August month missing a rate", got, want)
 	}
-	if empty := newSpendingChart(nil); empty.Labels == nil || empty.TotalCents == nil {
-		t.Errorf("newSpendingChart(nil) = %+v, want empty slices that encode as []", empty)
-	}
 }

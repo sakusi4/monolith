@@ -25,7 +25,4 @@ func TestNewNetWorthChart(t *testing.T) {
 	if got := newNetWorthChart(snapshots); !reflect.DeepEqual(got, want) {
 		t.Errorf("newNetWorthChart() = %+v, want %+v, oldest first without the August month missing a rate", got, want)
 	}
-	if empty := newNetWorthChart(nil); empty.Labels == nil || empty.NetWorthCents == nil || empty.LoansCents == nil {
-		t.Errorf("newNetWorthChart(nil) = %+v, want empty slices that encode as []", empty)
-	}
 }

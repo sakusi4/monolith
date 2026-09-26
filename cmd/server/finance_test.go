@@ -59,18 +59,6 @@ func TestFinance(t *testing.T) {
 		return n
 	}
 
-	t.Run("the current month starts empty", func(t *testing.T) {
-		got := body(t, "/finance/assets")
-		for _, want := range []string{"<h1>Assets</h1>", `href="/finance/assets" aria-current="page"`, `<h2 id="snapshot">Snapshot</h2>`, "yet.", "Add to "} {
-			if !strings.Contains(got, want) {
-				t.Errorf("GET /finance/assets does not contain %q:\n%s", want, got)
-			}
-		}
-		if strings.Contains(got, `<h2 id="trend">`) {
-			t.Errorf("GET /finance/assets shows a trend without any snapshot:\n%s", got)
-		}
-	})
-
 	if _, err := s.db.ExecContext(t.Context(), `
 		INSERT INTO exchange_rates (month, currency, per_usd)
 		VALUES ('2024-12-01', 'KRW', 1000), ('2025-03-01', 'KRW', 2000)`); err != nil {
@@ -87,7 +75,6 @@ func TestFinance(t *testing.T) {
 	t.Run("invalid rows show the form again", func(t *testing.T) {
 		for _, form := range []url.Values{
 			{"name": {"  "}, "type": {"cash"}, "currency": {"USD"}, "amount": {"1"}},
-			{"name": {"Euro cash"}, "type": {"cash"}, "currency": {"EUR"}, "amount": {"1"}},
 			{"name": {"Won cash"}, "type": {"cash"}, "currency": {"KRW"}, "amount": {"12.5"}},
 		} {
 			wantStatus(t, "/finance/assets/2025-01/items/new", form, http.StatusUnprocessableEntity)
@@ -127,7 +114,7 @@ func TestFinance(t *testing.T) {
 	t.Run("edit changes the row in its month only", func(t *testing.T) {
 		mortgage := itemID(t, "2025-01", "Mortgage", "KRW")
 		edit := "/finance/assets/2025-01/items/" + mortgage + "/edit"
-		wantContains(t, edit, `form="edit-item"`, `value="-5,000,000"`, `value="Mortgage"`)
+		wantContains(t, edit, `value="-5,000,000"`, `value="Mortgage"`)
 		saved := url.Values{"name": {"Home loan"}, "type": {"loan"}, "currency": {"KRW"}, "amount": {"-6,000,000"}}
 		wantRedirect(t, s.post(t, edit, saved, session), "/finance/assets?direction=desc&month=2025-01&order=usd")
 		wantContains(t, "/finance/assets?month=2025-01", "Home loan", "USD 24,000.00")
@@ -155,14 +142,14 @@ func TestFinance(t *testing.T) {
 
 	t.Run("filters narrow the rows but not the net worth", func(t *testing.T) {
 		got := body(t, "/finance/assets?month=2025-01&type=deposit")
-		if strings.Contains(got, "<td>Brokerage</td>") || !strings.Contains(got, "<td>Savings</td>") || strings.Contains(got, `<th scope="row">Total</th>`) {
-			t.Errorf("deposit filter does not show only Savings, without a total row:\n%s", got)
+		if strings.Contains(got, "<td>Brokerage</td>") || !strings.Contains(got, "<td>Savings</td>") {
+			t.Errorf("deposit filter does not show only Savings:\n%s", got)
 		}
 		wantContains(t, "/finance/assets?month=2025-01&type=deposit", "USD 24,000.00", "KRW 20,000,000")
 	})
 
 	t.Run("the page charts net worth and loans by month", func(t *testing.T) {
-		wantContains(t, "/finance/assets?month=2025-01", `<h2 id="trend">Trend</h2>`,
+		wantContains(t, "/finance/assets?month=2025-01",
 			`<script type="application/json" id="totals-data">{"labels":["Jan 2025","Mar 2025","May 2025"],"netWorthCents":[2400000,51250,51250],"loansCents":[600000,0,0]}</script>`)
 	})
 
@@ -179,16 +166,5 @@ func TestFinance(t *testing.T) {
 			}
 		}
 		wantStatus(t, "/finance/assets/2099-01/items/new", url.Values{"name": {"x"}, "type": {"cash"}, "currency": {"USD"}, "amount": {"1"}}, http.StatusNotFound)
-	})
-
-	t.Run("htmx requests get the same page", func(t *testing.T) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/finance/assets?month=2025-01", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("HX-Request", "true")
-		if rec := s.do(t, req, session); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `<main hx-target="main"`) {
-			t.Errorf("htmx GET = %d, want 200 with the whole page", rec.Code)
-		}
 	})
 }

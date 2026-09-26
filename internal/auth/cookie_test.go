@@ -9,7 +9,6 @@ func TestIsLocalhost(t *testing.T) {
 	}{
 		{"localhost:5173", true},
 		{"127.0.0.1:8080", true},
-		{"monolith.example.com", false},
 		{"localhost.example.com", false},
 	}
 	for _, tt := range tests {

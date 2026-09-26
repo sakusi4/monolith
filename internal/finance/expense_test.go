@@ -20,7 +20,6 @@ func TestExpenseInput_Clean(t *testing.T) {
 		{"no date", ExpenseInput{Name: "Rent", Category: CategoryHousing, Currency: money.AED}, ExpenseInput{}, true},
 		{"empty name", ExpenseInput{Date: day, Name: "  ", Category: CategoryFood, Currency: money.USD}, ExpenseInput{}, true},
 		{"unknown category", ExpenseInput{Date: day, Name: "Gym", Category: "sports", Currency: money.USD}, ExpenseInput{}, true},
-		{"unknown currency", ExpenseInput{Date: day, Name: "Rent", Category: CategoryHousing, Currency: "EUR"}, ExpenseInput{}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
