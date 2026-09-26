@@ -4,7 +4,7 @@
 
 ## 목적
 
-어디에 얼마를 쓰는지 항목별로 본다. 월세, 넷플릭스, 비행기표 같은 지출을 날짜와 함께 적고, 한 달 단위로 합계를 USD로 본다. 각 행에는 고정 목록의 분류(category)를 하나 붙인다. 화면은 선택한 달의 기록만 읽는다. 분류별 소계, 예산, 여러 달 보기, 다른 달과의 비교는 하지 않는다.
+어디에 얼마를 쓰는지 항목별로 본다. 월세, 넷플릭스, 비행기표 같은 지출을 날짜와 함께 적고, 한 달 단위로 합계를 USD로 본다. 각 행에는 고정 목록의 분류(category)를 하나 붙인다. 여러 달의 흐름은 월 합계 막대 차트 하나로 본다. 분류별 합계, 예산, 다른 달과의 비교는 하지 않는다.
 
 지출은 자산 스냅샷과 별개다. 지출을 기록해도 스냅샷 금액은 바뀌지 않는다.
 
@@ -22,7 +22,7 @@
 | 기록 가능한 달 | 스냅샷과 같다: 2024년 2월부터 `TIMEZONE` 기준 이번 달까지. 범위 밖은 404 |
 | 환산 | 스냅샷과 같은 월 환율(`exchange_rates`)에서 가장 가까운 달의 값을 쓴다 |
 | 날짜 기본값 | 추가 폼은 `TIMEZONE` 기준 오늘로 시작한다. 이번 달이 아닌 달의 화면에서는 오늘이 그 달에 없으므로 그 달 1일로 시작한다 |
-| 조회 범위 | 화면은 선택한 달의 행과, 추천을 위한 이름 목록만 읽는다. 다른 달과 비교하지 않는다 |
+| 조회 범위 | Records 패널은 선택한 달의 행과, 추천을 위한 이름 목록만 읽는다. Trend 패널의 차트만 모든 달의 행을 읽는다. 다른 달과 비교하지 않는다 |
 | 달 테이블 | 두지 않는다. 그 달의 날짜로 된 행이 없으면 빈 달이다 |
 
 ## 데이터 모델: `0008.sql`
@@ -46,7 +46,7 @@ CREATE INDEX expenses_spent_on_idx ON expenses (spent_on);
 
 ## 화면
 
-모든 라우트는 로그인이 필요하다. `{month}`는 `2006-01` 형식이다. 사이드바의 Finance 아래에 Snapshots 다음으로 Expenses 링크를 둔다.
+모든 라우트는 로그인이 필요하다. `{month}`는 `2006-01` 형식이다. 사이드바의 Finance 아래에 Assets 다음으로 Expenses 링크를 둔다.
 
 | 라우트 | 동작 |
 |---|---|
@@ -60,43 +60,50 @@ POST가 성공하면 그 달의 목록(`/finance/expenses?month=…`)으로 303�
 
 ### 지출 화면 (`expense_list.html`)
 
+Assets 화면과 같은 구조다. 제목 "Expenses" 아래에 역할이 다른 두 패널(`<article>`)이 있다. 위의 Trend는 여러 달의 추이이고 선택한 달과 무관하다. 아래의 Records는 선택한 달의 기록이다.
+
 위에서 아래로:
 
-1. 제목 "Expenses"와 월 선택. 월을 바꾸면 바로 이동한다.
-2. 요약 카드(기록이 있는 달만): Total(USD). 환율이 없는 통화가 있으면 카드 대신 빠진 통화를 알린다.
-3. 적용 환율(기록이 있는 달만): 스냅샷 화면과 같은 한 줄.
-4. 표: Name, Category, Date(`Sep 25`), Amount(원래 통화), USD, Edit·Delete, 합계 행. 좁은 화면에서는 분류와 날짜가 이름 아래에 보인다.
-   - USD가 큰 순서로 고정하고, USD 값이 없는 행은 맨 뒤에 둔다. 필터와 정렬 막대는 두지 않는다.
-   - 수정하면 그 행이 이름, 분류, 날짜, 금액, 통화 입력칸으로 바뀐다.
-   - 합계 행의 Amount는 행이 모두 같은 통화일 때만, USD는 모든 행에 USD 값이 있을 때만 표시한다.
-5. 빈 달이면 "No expenses in … yet." 문구만 보인다. 지출은 달마다 달라서 다른 달을 복사하는 기능은 없다(스냅샷과 다른 점).
-6. 추가 폼: Date, Name, Category, Currency, Amount.
+1. 제목 "Expenses". 헤더에는 제목만 있다.
+2. Trend 패널(기록이 한 달이라도 있으면): "Spending by month". 달마다 그 달 합계(USD)를 막대 하나로 그린다(`newSpendingChart`, `spending_chart.js`).
+   - 색은 `--series-1` 하나다. 계열이 하나라 범례는 없고, 툴팁은 `Total: USD 3,522.95`다.
+   - 합계는 Records의 Total 카드와 같은 계산(`summarizeExpenses`)이다. 환율이 없는 통화가 있는 달과 기록이 없는 달은 빠진다.
+   - 데이터는 Go가 `<script type="application/json">`에 USD 센트로 넣고 `spending_chart.js`가 읽는다. htmx가 `main`을 바꿔 끼우면(`htmx:load`) 새 캔버스에 다시 그린다.
+3. Records 패널. 헤더에 "Records"와 월 선택이 있다. 월을 바꾸면 바로 이동한다. 아래 4~8이 이 패널 안에 있다.
+4. 요약(기록이 있는 달만): Total(USD) 카드와 적용 환율(스냅샷 화면과 같은 한 줄). 환율이 없는 통화가 있으면 카드 대신 빠진 통화를 알린다.
+5. 표: Date(`Sep 25`), Category, Name, Amount(원래 통화), USD, Edit·Delete. 합계 행은 없다(요약 카드와 중복). 좁은 화면에서는 날짜가 행의 제목이 되고 분류와 이름이 그 아래에 보인다.
+   - 날짜 내림차순으로 정렬하고, 같은 날짜 안에서는 USD가 큰 순서로 둔다. USD 값이 없는 행은 그 날짜의 맨 뒤다. 필터와 정렬 막대는 두지 않는다.
+   - 수정하면 그 행이 날짜, 분류, 이름, 금액, 통화 입력칸으로 바뀐다.
+6. 빈 달이면 "No expenses in … yet." 문구만 보인다. 지출은 달마다 달라서 다른 달을 복사하는 기능은 없다(스냅샷과 다른 점).
+7. 추가 폼: Date, Category, Name, Currency, Amount(표와 같은 순서).
    - Date는 `<input type="date">`이고 그 달의 1일~말일만 고를 수 있다(`min`, `max`). 기본값은 위의 날짜 기본값이다.
    - Name은 과거에 쓴 이름을 추천한다. 이름마다 한 번, 가장 최근의 분류·통화와 함께이고, 이번 달에 이미 있는 이름은 빼고 추천한다.
    - 추천한 이름을 입력하면 Category와 Currency가 그 값으로 채워지지만 잠기지 않는다(`item_form.js`).
    - 서버는 이름으로 아무것도 찾지 않고 폼에 온 값 그대로 행을 만든다.
-7. 환율 출처 링크 "Rates by Exchange Rate API".
+8. 패널 밖, 환율 출처 링크 "Rates by Exchange Rate API".
 
 422가 되는 경우:
 
 - 추가와 수정: 이름이 비었거나 분류·통화가 목록 밖, 금액을 그 통화로 해석할 수 없음, 날짜가 없거나 형식이 틀리거나 그 달 밖("Pick a date in Sep 2026.").
 
-htmx는 스냅샷 화면과 같은 방식으로 이 화면에서만 불러온다. 표와 추가 폼에 `hx-boost`를 건다. 서버는 항상 전체 페이지를 그린다.
+htmx는 스냅샷 화면과 같은 방식으로 불러오고, Chart.js와 `spending_chart.js`는 이 화면에서만 불러온다. 월 선택 폼, 표, 추가 폼에 `hx-boost`를 건다. 서버는 항상 전체 페이지를 그린다.
 
 ## 코드 배치
 
 | 파일 | 내용 |
 |---|---|
 | `internal/postgres/migrations/0008.sql` | `expenses` 테이블 |
-| `internal/finance/expense.go` | `ExpenseCategory`와 표시 이름, `Expense`와 `USD()`, `ExpenseInput`과 `Clean`, 이름 추천(`expenseSuggestions`), `Store`의 조회와 쓰기(`Expenses`, `AddExpense`, `UpdateExpense`, `DeleteExpense`) |
-| `internal/finance/expense_list.go` | 한 달의 합계(`summarizeExpenses`), 표의 행과 정렬, 합계 행, 날짜 기본값(`defaultExpenseDate`)과 달 범위(`inMonth`) |
+| `internal/finance/expense.go` | `ExpenseCategory`와 표시 이름, `Expense`와 `USD()`, `ExpenseInput`과 `Clean`, 이름 추천(`expenseSuggestions`), `Store`의 조회와 쓰기(`Expenses(ctx, from, to)`, `AddExpense`, `UpdateExpense`, `DeleteExpense`) |
+| `internal/finance/expense_list.go` | 한 달의 합계(`summarizeExpenses`), 표의 행과 정렬, 날짜 기본값(`defaultExpenseDate`)과 달 범위(`inMonth`) |
+| `internal/finance/spending_chart.go` | Trend 차트 데이터(`newSpendingChart`) |
 | `internal/finance/expense_handler.go` | 지출 화면의 핸들러와 페이지 데이터, 폼 값을 `ExpenseInput`으로 바꾸는 `expenseInput` |
 | `internal/finance/handler.go` | 지출 라우트 |
 | `web/templates/expense_list.html` | 지출 화면 |
 | `web/templates/layout.html` | 사이드바 링크 |
+| `web/static/spending_chart.js` | Trend 막대 차트 |
 | `web/static/item_form.js` | 추가 폼에서 추천한 이름의 분류와 통화를 채운다. 스냅샷 화면과 같이 쓴다 |
 
-- 재사용하는 것: `money`(해석, 표시, 환산, 환율 표시), `currentMonth`, `monthsUntil`, `monthFilter`, `usdValue`, `rowTotal`, `itemForm`, `listView`, `appliedRates`, `requireRow`, 그리고 스냅샷과 같은 에러 값(`ErrInvalidItem`, `ErrItemNotFound`).
+- 재사용하는 것: `money`(해석, 표시, 환산, 환율 표시), `currentMonth`, `monthsUntil`, `monthFilter`, `usdValue`, `itemForm`, `listView`, `appliedRates`, `requireRow`, 그리고 스냅샷과 같은 에러 값(`ErrInvalidItem`, `ErrItemNotFound`).
 - 스냅샷 핸들러와 구조가 비슷해도 공통 추상화를 만들지 않는다(CLAUDE.md 8.6).
 
 ## 테스트
@@ -106,13 +113,14 @@ htmx는 스냅샷 화면과 같은 방식으로 이 화면에서만 불러온다
 - `ExpenseInput.Clean`: 날짜 없음, 빈 이름, 목록 밖 분류, 목록 밖 통화, 앞뒤 공백
 - `defaultExpenseDate`: 이번 달이면 오늘, 시간대에 따라 바뀌는 오늘, 다른 달이면 1일
 - 한 달 합계: 여러 통화, 음수 금액, 환율 없는 통화
-- 표 정렬: USD 내림차순, USD 값이 없는 행은 맨 뒤
-- 합계 행: 한 통화, 여러 통화, USD 없는 행
+- 표 정렬: 날짜 내림차순, 같은 날짜 안에서 USD 내림차순, USD 값이 없는 행은 그 날짜의 맨 뒤
+- Trend 차트: 달별 합계를 오래된 달부터, 환율이 빠진 달 제외, 빈 입력은 빈 배열
 
 **HTTP 통합 테스트** (`cmd/server/expense_test.go`의 `TestExpenses`, 실제 DB)
 
 - USD, KRW, AED 행을 추가하면 분류, 원래 통화와 USD 값, 합계가 보이고 가장 가까운 달의 환율이 적용된다.
 - 음수 금액(환불)은 합계를 줄인다.
+- Trend 차트는 어느 달을 보든 모든 달의 합계를 오래된 달부터 담고, 기록이 없으면 Trend 패널이 없다.
 - 같은 이름을 다른 통화로 두 번 적을 수 있고, 과거 이름이 분류·통화와 함께 추천되되 이번 달에 있는 이름은 빠진다.
 - 날짜가 표에 보이고, 이번 달이 아닌 달의 추가 폼은 그 달 1일로 시작하며 그 달만 고를 수 있다.
 - 잘못된 입력(빈 이름, 목록 밖 분류·통화, 해석할 수 없는 금액, 없거나 틀리거나 그 달 밖의 날짜)은 422다.
@@ -124,8 +132,8 @@ htmx는 스냅샷 화면과 같은 방식으로 이 화면에서만 불러온다
 
 ## 범위 밖
 
-- 분류별 소계와 분류 필터, 예산
-- 여러 달 보기(항목×월 표), 대시보드 표시, 다른 달과의 비교
+- 분류별 합계와 분류 필터, 예산
+- 분류별 추이(분류마다 색을 나눈 누적 막대), 여러 달 보기(항목×월 표), 다른 달과의 비교
 - 다른 달 복사. 지출은 달마다 달라서 복사할 이유가 없다
 - 월별 메모
 - 필터와 정렬 선택

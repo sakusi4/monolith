@@ -14,12 +14,12 @@ import (
 )
 
 type expenseListPage struct {
+	Chart       spendingChart
 	Month       time.Time
 	MonthOpts   web.Filter
 	Summary     expenseSummary
 	Rates       []appliedRate
 	Rows        []expenseListRow
-	Total       rowTotal
 	Edit        itemForm
 	Add         itemForm
 	Suggestions []expenseSuggestion
@@ -65,7 +65,7 @@ func (h *handler) renderExpenses(w http.ResponseWriter, r *http.Request, status 
 		web.ServerError(w, r, err)
 		return
 	}
-	expenses, err := h.store.Expenses(r.Context(), month)
+	expenses, err := h.store.Expenses(r.Context(), month, month.AddDate(0, 1, 0))
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
@@ -75,6 +75,12 @@ func (h *handler) renderExpenses(w http.ResponseWriter, r *http.Request, status 
 		http.NotFound(w, r)
 		return
 	}
+	all, err := h.store.Expenses(r.Context(), firstMonth, months[0].AddDate(0, 1, 0))
+	if err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	page.Chart = newSpendingChart(all)
 	web.Render(w, r, status, "expense_list", page)
 }
 
@@ -90,7 +96,6 @@ func newExpenseListPage(month time.Time, months []time.Time, suggestions []expen
 		Month:       month,
 		MonthOpts:   monthFilter(months, month),
 		Rows:        tableRows,
-		Total:       expenseTotalOf(rows),
 		Edit:        edit,
 		Add:         view.Add,
 		Suggestions: unusedExpenseSuggestions(suggestions, expenses),

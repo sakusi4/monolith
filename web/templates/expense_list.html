@@ -3,138 +3,147 @@
 <meta name="htmx-config" content='{"scrollIntoViewOnBoost":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
 <script src="/static/htmx-2.0.11.min.js" defer></script>
 <script src="/static/item_form.js" defer></script>
+<script src="/static/chart-4.5.1.umd.min.js" defer></script>
+<script src="/static/spending_chart.js" defer></script>
 {{end}}
 {{define "content"}}
 <header>
   <h1>Expenses</h1>
-  {{with .MonthOpts}}
-  <form method="get" action="/finance/expenses" hx-boost="true">
-    <label>{{.Label}}
-      <select name="{{.Name}}" onchange="this.form.requestSubmit()">
-        {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-      </select>
-    </label>
-    <noscript><button type="submit">Show</button></noscript>
-  </form>
-  {{end}}
 </header>
-{{with .Error}}<p role="alert">{{.}}</p>{{end}}
-{{if .Rows}}
-<section aria-label="Summary">
-  {{with .Summary}}
-  {{if .Missing}}
-  <p role="alert">Missing exchange rate for {{range $i, $c := .Missing}}{{if $i}}, {{end}}{{$c}}{{end}}.</p>
-  {{else}}
-  <dl>
+{{if .Chart.Labels}}
+<article aria-labelledby="trend">
+  <header>
+    <h2 id="trend">Trend</h2>
+  </header>
+  <figure>
+    <figcaption>Spending by month</figcaption>
     <div>
-      <dt>Total</dt>
-      <dd>
-        <strong>{{money "USD" .Total}}</strong>
-      </dd>
+      <canvas id="spending-chart" role="img" aria-label="Bar chart of spending by month"></canvas>
     </div>
-  </dl>
-  {{end}}
-  {{end}}
-  {{with .Rates}}
-  <p>Rates: 1 USD = {{range $i, $r := .}}{{if $i}} · {{end}}{{$r.Currency}} {{$r.PerUSD}}{{if $r.OtherMonth}} ({{$r.Month.Format "Jan 2006"}}){{end}}{{end}}</p>
-  {{end}}
-</section>
-<table hx-boost="true">
-  <thead>
-    <tr><th>Name</th><th>Category</th><th>Date</th><th class="num">Amount</th><th class="num">USD</th><th></th></tr>
-  </thead>
-  <tbody>
-    {{range $row := .Rows}}
-    {{if $row.Editing}}
-    {{with $.Edit}}
-    <tr>
-      <td><label><span>Name</span><input name="name" value="{{.Name}}" form="edit-item" required></label></td>
-      <td>
-        <label><span>Category</span>
-          <select name="category" form="edit-item">
-            {{range $.Categories}}<option value="{{.}}"{{if eq . $.Edit.Category}} selected{{end}}>{{.Label}}</option>{{end}}
-          </select>
-        </label>
-      </td>
-      <td><label><span>Date</span><input type="date" name="date" value="{{.Date}}" min="{{$.DateMin}}" max="{{$.DateMax}}" form="edit-item" required></label></td>
-      <td class="num"><label><span>Amount</span><input name="amount" value="{{.Amount}}" form="edit-item" inputmode="decimal" required></label></td>
-      <td class="num">
-        <label><span>Currency</span>
-          <select name="currency" form="edit-item">
-            {{range $.Currencies}}<option value="{{.}}"{{if eq . $.Edit.Currency}} selected{{end}}>{{.}}</option>{{end}}
-          </select>
-        </label>
-      </td>
-      <td class="actions">
-        <form id="edit-item" method="post" action="{{.URL}}"><button type="submit" class="primary">Save</button></form>
-        <a href="{{.CancelURL}}">Cancel</a>
-      </td>
-    </tr>
-    {{with .Error}}<tr><td colspan="6" role="alert">{{.}}</td></tr>{{end}}
-    {{end}}
-    {{else}}
-    {{with $row.Row}}
-    <tr>
-      <td>{{.Expense.Name}}</td>
-      <td>{{.Expense.Category.Label}}</td>
-      <td>{{.Expense.Date.Format "Jan 2"}}</td>
-      <td class="num">{{money .Expense.Currency .Expense.Amount}}</td>
-      <td class="num">{{if .HasUSD}}{{money "USD" .USD}}{{else}}—{{end}}</td>
-      <td class="actions">
-        <a href="{{$row.EditURL}}" aria-label="Edit {{.Expense.Name}}">Edit</a>
-        <form method="post" action="{{$row.DeleteURL}}" hx-confirm="Remove {{.Expense.Name}} from this month?">
-          <button type="submit" class="danger" aria-label="Delete {{.Expense.Name}}">Delete</button>
-        </form>
-      </td>
-    </tr>
-    {{end}}
-    {{end}}
-    {{end}}
-  </tbody>
-  {{with .Total}}
-  <tfoot>
-    <tr>
-      <th scope="row">Total</th>
-      <td></td>
-      <td></td>
-      <td class="num">{{if .HasAmount}}{{money .Currency .Amount}}{{end}}</td>
-      <td class="num">{{if .HasUSD}}{{money "USD" .USD}}{{else}}—{{end}}</td>
-      <td></td>
-    </tr>
-  </tfoot>
-  {{end}}
-</table>
-{{else}}
-<p>No expenses in {{.Month.Format "Jan 2006"}} yet.</p>
+    <script type="application/json" id="spending-data">{{.Chart}}</script>
+  </figure>
+</article>
 {{end}}
-<form id="add-item" method="post" action="{{.Add.URL}}" hx-boost="true">
-  <fieldset>
-    <legend>Add to {{.Month.Format "Jan 2006"}}</legend>
-    <label>Date
-      <input type="date" name="date" value="{{.Add.Date}}" min="{{.DateMin}}" max="{{.DateMax}}" required>
-    </label>
-    <label>Name
-      <input name="name" value="{{.Add.Name}}" list="expense-names" autocomplete="off" required>
-    </label>
-    <datalist id="expense-names">
-      {{range .Suggestions}}<option value="{{.Name}}" data-category="{{.Category}}" data-currency="{{.Currency}}">{{.Category.Label}} · {{.Currency}}</option>{{end}}
-    </datalist>
-    <label>Category
-      <select name="category">
-        {{range .Categories}}<option value="{{.}}"{{if eq . $.Add.Category}} selected{{end}}>{{.Label}}</option>{{end}}
-      </select>
-    </label>
-    <label>Currency
-      <select name="currency">
-        {{range .Currencies}}<option value="{{.}}"{{if eq . $.Add.Currency}} selected{{end}}>{{.}}</option>{{end}}
-      </select>
-    </label>
-    <label>Amount
-      <input name="amount" value="{{.Add.Amount}}" inputmode="decimal" placeholder="1,234.56" required>
-    </label>
-    <button type="submit" class="primary">Add</button>
-  </fieldset>
-  {{with .Add.Error}}<p role="alert">{{.}}</p>{{end}}
-</form>
+<article aria-labelledby="records">
+  <header>
+    <h2 id="records">Records</h2>
+    {{with .MonthOpts}}
+    <form method="get" action="/finance/expenses" hx-boost="true">
+      <label>{{.Label}}
+        <select name="{{.Name}}" onchange="this.form.requestSubmit()">
+          {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <noscript><button type="submit">Show</button></noscript>
+    </form>
+    {{end}}
+  </header>
+  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
+  {{if .Rows}}
+  <section aria-label="Summary">
+    {{with .Summary}}
+    {{if .Missing}}
+    <p role="alert">Missing exchange rate for {{range $i, $c := .Missing}}{{if $i}}, {{end}}{{$c}}{{end}}.</p>
+    {{else}}
+    <dl>
+      <div>
+        <dt>Total</dt>
+        <dd>
+          <strong>{{money "USD" .Total}}</strong>
+        </dd>
+      </div>
+    </dl>
+    {{end}}
+    {{end}}
+    {{with .Rates}}
+    <p>Rates: 1 USD = {{range $i, $r := .}}{{if $i}} · {{end}}{{$r.Currency}} {{$r.PerUSD}}{{if $r.OtherMonth}} ({{$r.Month.Format "Jan 2006"}}){{end}}{{end}}</p>
+    {{end}}
+  </section>
+  <table hx-boost="true">
+    <thead>
+      <tr><th>Date</th><th>Category</th><th>Name</th><th class="num">Amount</th><th class="num">USD</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range $row := .Rows}}
+      {{if $row.Editing}}
+      {{with $.Edit}}
+      <tr>
+        <td><label><span>Date</span><input type="date" name="date" value="{{.Date}}" min="{{$.DateMin}}" max="{{$.DateMax}}" form="edit-item" required></label></td>
+        <td>
+          <label><span>Category</span>
+            <select name="category" form="edit-item">
+              {{range $.Categories}}<option value="{{.}}"{{if eq . $.Edit.Category}} selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </label>
+        </td>
+        <td><label><span>Name</span><input name="name" value="{{.Name}}" form="edit-item" required></label></td>
+        <td class="num"><label><span>Amount</span><input name="amount" value="{{.Amount}}" form="edit-item" inputmode="decimal" required></label></td>
+        <td class="num">
+          <label><span>Currency</span>
+            <select name="currency" form="edit-item">
+              {{range $.Currencies}}<option value="{{.}}"{{if eq . $.Edit.Currency}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </label>
+        </td>
+        <td class="actions">
+          <form id="edit-item" method="post" action="{{.URL}}"><button type="submit" class="primary">Save</button></form>
+          <a href="{{.CancelURL}}">Cancel</a>
+        </td>
+      </tr>
+      {{with .Error}}<tr><td colspan="6" role="alert">{{.}}</td></tr>{{end}}
+      {{end}}
+      {{else}}
+      {{with $row.Row}}
+      <tr>
+        <td>{{.Expense.Date.Format "Jan 2"}}</td>
+        <td>{{.Expense.Category.Label}}</td>
+        <td>{{.Expense.Name}}</td>
+        <td class="num">{{money .Expense.Currency .Expense.Amount}}</td>
+        <td class="num">{{if .HasUSD}}{{money "USD" .USD}}{{else}}—{{end}}</td>
+        <td class="actions">
+          <a href="{{$row.EditURL}}" aria-label="Edit {{.Expense.Name}}">Edit</a>
+          <form method="post" action="{{$row.DeleteURL}}" hx-confirm="Remove {{.Expense.Name}} from this month?">
+            <button type="submit" class="danger" aria-label="Delete {{.Expense.Name}}">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+      {{end}}
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p>No expenses in {{.Month.Format "Jan 2006"}} yet.</p>
+  {{end}}
+  <form id="add-item" method="post" action="{{.Add.URL}}" hx-boost="true">
+    <fieldset>
+      <legend>Add to {{.Month.Format "Jan 2006"}}</legend>
+      <label>Date
+        <input type="date" name="date" value="{{.Add.Date}}" min="{{.DateMin}}" max="{{.DateMax}}" required>
+      </label>
+      <label>Category
+        <select name="category">
+          {{range .Categories}}<option value="{{.}}"{{if eq . $.Add.Category}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      <label>Name
+        <input name="name" value="{{.Add.Name}}" list="expense-names" autocomplete="off" required>
+      </label>
+      <datalist id="expense-names">
+        {{range .Suggestions}}<option value="{{.Name}}" data-category="{{.Category}}" data-currency="{{.Currency}}">{{.Category.Label}} · {{.Currency}}</option>{{end}}
+      </datalist>
+      <label>Currency
+        <select name="currency">
+          {{range .Currencies}}<option value="{{.}}"{{if eq . $.Add.Currency}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+      <label>Amount
+        <input name="amount" value="{{.Add.Amount}}" inputmode="decimal" placeholder="1,234.56" required>
+      </label>
+      <button type="submit" class="primary">Add</button>
+    </fieldset>
+    {{with .Add.Error}}<p role="alert">{{.}}</p>{{end}}
+  </form>
+</article>
 <footer><a href="https://www.exchangerate-api.com">Rates by Exchange Rate API</a></footer>
 {{end}}

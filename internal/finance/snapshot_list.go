@@ -53,16 +53,6 @@ type assetRow struct {
 	HasUSD bool
 }
 
-// rowTotal sums a table's rows. Amount is set only when they share one currency,
-// and USD only when every one of them has a USD value.
-type rowTotal struct {
-	Amount    int64
-	Currency  money.Currency
-	HasAmount bool
-	USD       int64
-	HasUSD    bool
-}
-
 func parseAssetQuery(v url.Values) (assetQuery, error) {
 	var q assetQuery
 	var monthErr error
@@ -145,30 +135,16 @@ func assetRows(s Snapshot) []assetRow {
 	return rows
 }
 
-func totalOf(rows []assetRow) rowTotal {
-	if len(rows) == 0 {
-		return rowTotal{}
-	}
-	t := rowTotal{Currency: rows[0].Item.Currency, HasAmount: true, HasUSD: true}
-	for _, r := range rows {
-		t.HasAmount = t.HasAmount && r.Item.Currency == t.Currency
-		t.HasUSD = t.HasUSD && r.HasUSD
-		t.Amount += r.Item.Amount
-		t.USD += r.USD
-	}
-	return t
-}
-
 // listURL is the snapshot list of month with q's filters.
 func (q assetQuery) listURL(month time.Time) string {
 	v := q.values()
 	v.Set("month", month.Format(monthLayout))
-	return "/finance/snapshots?" + v.Encode()
+	return "/finance/assets?" + v.Encode()
 }
 
 // itemURL is an action on the month's items that returns to the list with q's filters.
 func (q assetQuery) itemURL(month time.Time, action string) string {
-	return "/finance/snapshots/" + month.Format(monthLayout) + "/" + action + "?" + q.values().Encode()
+	return "/finance/assets/" + month.Format(monthLayout) + "/" + action + "?" + q.values().Encode()
 }
 
 func (q assetQuery) values() url.Values {

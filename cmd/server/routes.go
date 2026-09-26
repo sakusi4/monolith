@@ -20,7 +20,7 @@ func routes(db *sql.DB, loc *time.Location) http.Handler {
 	mux.Handle("GET /{$}", http.RedirectHandler("/dashboard", http.StatusSeeOther))
 	mux.Handle("GET /static/", web.Static())
 	mux.Handle("/auth/", auth.NewHandler(authStore))
-	mux.Handle("/dashboard", requireAuth(dashboard.NewHandler(financeStore)))
+	mux.Handle("/dashboard", requireAuth(dashboard.NewHandler()))
 	mux.Handle("/finance/", requireAuth(finance.NewHandler(financeStore, loc)))
 	return http.NewCrossOriginProtection().Handler(mux)
 }

@@ -4,7 +4,7 @@
 
 ## 목적
 
-매월 자산과 부채의 금액을 기록하고, 각 달의 순자산을 USD로 비교한다. 자산은 USD, KRW, AED, JPY로 섞여 있다. 환율은 달마다 하나를 저장하고, 스냅샷은 그 달의 환율로 환산한다.
+매월 자산과 부채의 금액을 기록하고, 각 달의 순자산을 USD로 비교한다. 사이드바 메뉴와 화면 이름은 **Assets**(`/finance/assets`)다. 코드와 DB는 저장 방식대로 스냅샷(`snapshots`, `snapshot_items`)이라고 부른다. 자산은 USD, KRW, AED, JPY로 섞여 있다. 환율은 달마다 하나를 저장하고, 스냅샷은 그 달의 환율로 환산한다.
 
 ## 결정 사항
 
@@ -73,7 +73,7 @@ CREATE TABLE exchange_rates (
 
 ## 환산
 
-- 스냅샷 화면은 선택한 달의 스냅샷만 읽는다(`Store.Snapshot`). 대시보드는 차트 때문에 모든 달을 읽는다(`Store.Snapshots`). 두 쿼리 모두 항목마다 가장 가까운 달의 환율을 `LATERAL JOIN`으로 붙인다.
+- Assets 화면의 Snapshot 패널(요약, 환율, 표, 폼)은 선택한 달의 스냅샷만 읽는다(`Store.Snapshot`). Trend 패널의 차트만 모든 달을 읽는다(`Store.Snapshots`). 두 쿼리 모두 항목마다 가장 가까운 달의 환율을 `LATERAL JOIN`으로 붙인다.
 - `numeric`은 문자열로 스캔해 `big.Rat`으로 바꾼다.
 - `money.ToUSD`가 최소 단위 금액을 USD 센트로 바꾼다. `math/big`으로 계산하고, 0.5는 0에서 먼 쪽으로 반올림한다. 금액 정수로 돌아오는 반올림은 이 함수에서만 한다.
 - USD가 아닌 통화인데 저장된 환율이 하나도 없으면 그 항목의 USD 값은 "없음"이다. 그 달의 요약은 순자산 대신 빠진 통화를 표시한다.
@@ -84,44 +84,49 @@ CREATE TABLE exchange_rates (
 
 | 라우트 | 동작 |
 |---|---|
-| `GET /finance/snapshots` | 한 달의 스냅샷. `month`가 없으면 이번 달 |
-| `POST /finance/snapshots/{month}/items/new` | 행 추가 |
-| `GET /finance/snapshots/{month}/items/{id}/edit` | 그 행만 입력칸으로 바꾼 목록. `{id}`는 행 id이고, 그 달의 행이 아니면 404 |
-| `POST /finance/snapshots/{month}/items/{id}/edit` | 행 수정. 그 달의 행이 아니면 404 |
-| `POST /finance/snapshots/{month}/items/{id}/delete` | 행 삭제. 그 달의 행이 아니면 404 |
-| `POST /finance/snapshots/{month}/copy` | 빈 달에 직전 스냅샷의 행을 복사 |
-| `POST /finance/snapshots/{month}/note` | 메모 저장. 스냅샷이 없는 달이면 404 |
-| `GET /dashboard` | 최신 스냅샷의 요약과 월별 차트 |
+| `GET /finance/assets` | 한 달의 스냅샷. `month`가 없으면 이번 달 |
+| `POST /finance/assets/{month}/items/new` | 행 추가 |
+| `GET /finance/assets/{month}/items/{id}/edit` | 그 행만 입력칸으로 바꾼 목록. `{id}`는 행 id이고, 그 달의 행이 아니면 404 |
+| `POST /finance/assets/{month}/items/{id}/edit` | 행 수정. 그 달의 행이 아니면 404 |
+| `POST /finance/assets/{month}/items/{id}/delete` | 행 삭제. 그 달의 행이 아니면 404 |
+| `POST /finance/assets/{month}/copy` | 빈 달에 직전 스냅샷의 행을 복사 |
+| `POST /finance/assets/{month}/note` | 메모 저장. 스냅샷이 없는 달이면 404 |
+| `GET /dashboard` | 지금은 비어 있다("Nothing here yet."). 여러 메뉴를 조합한 요약은 나중에 정한다 |
 
 POST가 성공하면 같은 필터를 유지한 목록으로 303을 보낸다. 입력이 잘못되면 422로 목록을 다시 그리고 입력값과 에러 문구를 보여 준다.
 
-### 스냅샷 화면 (`snapshot_list.html`)
+### Assets 화면 (`snapshot_list.html`)
+
+각 메뉴의 통계는 그 메뉴 안에 둔다. 화면은 제목 "Assets" 아래에 역할이 다른 두 패널(`<article>`)로 나뉜다. 위의 Trend는 여러 달의 추이이고 선택한 달과 무관하다. 아래의 Snapshot은 선택한 달의 기록이다.
 
 위에서 아래로:
 
-1. 제목과 월 선택. 월을 바꾸면 바로 이동한다.
-2. 요약(스냅샷이 있는 달만): Net worth, Loans 카드. 다른 달과 비교하지 않는다. 환율이 없는 통화가 있으면 카드 대신 빠진 통화를 알린다.
-3. 적용 환율(스냅샷이 있는 달만): `Rates: 1 USD = KRW 1,374.61 · AED 3.6725`. 그 달 항목에 쓰인 통화만, `money.Currencies` 순서로 보여 준다. 다른 달의 환율을 빌렸으면 `(Aug 2026)`처럼 그 달을 붙인다. 값은 소수 넷째 자리까지다(`money.FormatRate`).
-4. 메모(스냅샷이 있는 달만): 한 줄 입력칸과 Save.
-5. 필터: Type, Currency(비면 전체), Sort by(USD·Name·Type, 기본 USD), Direction(기본 Descending). 목록 밖의 값이면 400이다. USD 값이 없는 행은 정렬과 무관하게 맨 뒤다. 필터는 표만 좁히고 요약은 바꾸지 않는다.
-6. 표: Name, Type, Amount(원래 통화), USD, Edit·Delete. 수정하면 그 행이 이름, 종류, 금액, 통화 입력칸으로 바뀐다. 합계 행의 Amount는 행이 모두 같은 통화일 때만, USD는 모든 행에 USD 값이 있을 때만 표시한다. 삭제는 확인 창을 띄운다.
-7. 빈 달이면 `Copy last recorded month` 버튼. 화면은 다른 달을 읽지 않으므로 복사할 달과 개수는 표시하지 않고, 이전 스냅샷이 없으면 누른 뒤 422로 알린다.
-8. 추가 폼: Name, Type, Currency, Amount. Name은 과거 스냅샷에 쓴 이름을 추천한다(이름마다 한 번, 가장 최근의 종류와 통화). 이번 달에 이미 있는 이름은 추천하지 않는다. 추천한 이름을 입력하면 Type과 Currency가 그 값으로 채워지지만 잠기지 않는다(`item_form.js`). 서버는 이름으로 아무것도 찾지 않고 폼에 온 값 그대로 행을 만든다.
-9. 출처 링크 "Rates by Exchange Rate API".
+1. 제목 "Assets". 헤더에는 제목만 있다.
+2. Trend 패널(기록이 한 달이라도 있으면): "Net worth and loans by month". 선 차트 하나에 Net worth와 Loans를 월별로 그린다(`newNetWorthChart`, `net_worth_chart.js`).
+   - 색은 `--series-1`, `--series-2`다.
+   - Loans는 차트에서만 양수(부채 잔액)로 그리고, 카드와 표에서는 음수다.
+   - 환율이 없는 통화가 있는 달은 뺀다. 기록이 없는 달도 빠지므로 가로축은 실제 시간 간격을 반영하지 않는다.
+   - 데이터는 Go가 `<script type="application/json">`에 USD 센트로 넣고 `net_worth_chart.js`가 읽는다. htmx가 `main`을 바꿔 끼우면(`htmx:load`) 새 캔버스에 다시 그린다.
+3. Snapshot 패널. 헤더에 "Snapshot"과 월 선택이 있다. 월을 바꾸면 바로 이동한다. 아래 4~10이 이 패널 안에 있다.
+4. 요약(스냅샷이 있는 달만): Net worth, Loans 카드. 다른 달과 비교하지 않는다. 환율이 없는 통화가 있으면 카드 대신 빠진 통화를 알린다.
+5. 적용 환율(스냅샷이 있는 달만): `Rates: 1 USD = KRW 1,374.61 · AED 3.6725`. 그 달 항목에 쓰인 통화만, `money.Currencies` 순서로 보여 준다. 다른 달의 환율을 빌렸으면 `(Aug 2026)`처럼 그 달을 붙인다. 값은 소수 넷째 자리까지다(`money.FormatRate`).
+6. 메모(스냅샷이 있는 달만): 한 줄 입력칸과 Save.
+7. 필터: Type, Currency(비면 전체), Sort by(USD·Name·Type, 기본 USD), Direction(기본 Descending). 목록 밖의 값이면 400이다. USD 값이 없는 행은 정렬과 무관하게 맨 뒤다. 필터는 표만 좁히고 요약은 바꾸지 않는다.
+8. 표: Name, Type, Amount(원래 통화), USD, Edit·Delete. 수정하면 그 행이 이름, 종류, 금액, 통화 입력칸으로 바뀐다. 합계 행은 없다(요약 카드와 중복). 삭제는 확인 창을 띄운다.
+9. 빈 달이면 `Copy last recorded month` 버튼. 화면은 다른 달을 읽지 않으므로 복사할 달과 개수는 표시하지 않고, 이전 스냅샷이 없으면 누른 뒤 422로 알린다.
+10. 추가 폼: Name, Type, Currency, Amount. Name은 과거 스냅샷에 쓴 이름을 추천한다(이름마다 한 번, 가장 최근의 종류와 통화). 이번 달에 이미 있는 이름은 추천하지 않는다. 추천한 이름을 입력하면 Type과 Currency가 그 값으로 채워지지만 잠기지 않는다(`item_form.js`). 서버는 이름으로 아무것도 찾지 않고 폼에 온 값 그대로 행을 만든다.
+11. 패널 밖, 출처 링크 "Rates by Exchange Rate API".
 
 422가 되는 경우:
 
 - 추가와 수정: 이름이 비었거나 종류·통화가 목록 밖, 금액을 그 통화로 해석할 수 없음(통화의 소수 자릿수 초과 포함).
 - 복사: 이미 항목이 있는 달, 이전 스냅샷이 없는 달.
 
-htmx와 `item_form.js`는 이 화면과 지출 화면에서만 불러온다. 스냅샷 화면은 선택한 달의 행과, 추천을 위한 이름 목록만 읽는다. 필터 폼, 표, 복사·메모·추가 폼에 `hx-boost`를 걸어 `main`만 바꿔 끼운다. 서버는 항상 전체 페이지를 그리므로 JS 없이도 같은 URL로 동작한다.
+htmx와 `item_form.js`는 이 화면과 지출 화면에서만, Chart.js와 `net_worth_chart.js`는 이 화면에서만 불러온다. Snapshot 패널은 선택한 달의 행과, 추천을 위한 이름 목록만 읽는다. 필터 폼, 표, 복사·메모·추가 폼에 `hx-boost`를 걸어 `main`만 바꿔 끼운다. 서버는 항상 전체 페이지를 그리므로 JS 없이도 같은 URL로 동작한다.
 
-### 대시보드 (`dashboard.html`, `dashboard.js`)
+### 대시보드 (`dashboard.html`)
 
-- 최신 스냅샷의 Net worth(기준 월 표시), Loans 카드.
-- 선 차트 하나에 Net worth와 Loans를 월별로 그린다. 색은 `--series-1`, `--series-2`다. Loans는 차트에서만 양수(부채 잔액)로 그리고, 카드와 표에서는 음수다.
-- 환율이 없는 통화가 있는 달은 차트에서 뺀다. 기록이 없는 달도 빠지므로 가로축은 실제 시간 간격을 반영하지 않는다.
-- 데이터는 Go가 `<script type="application/json">`에 USD 센트로 넣고 `dashboard.js`가 읽는다.
+지금은 제목과 "Nothing here yet."만 있다. 대시보드는 여러 메뉴(자산, 지출, 나중에 태스크·메모)를 조합해 훑어보는 요약판이 될 자리이고, 무엇을 조합할지는 나중에 정한다. 메뉴별 통계는 대시보드가 아니라 각 메뉴에 둔다.
 
 ## 코드 배치
 
@@ -129,16 +134,17 @@ htmx와 `item_form.js`는 이 화면과 지출 화면에서만 불러온다. 스
 |---|---|
 | `internal/money/money.go` | `Currency`, `Parse`, `Format`, `Input`, `ToUSD`, `FormatRate` |
 | `internal/finance/asset.go` | `AssetType`과 표시 이름 |
-| `internal/finance/snapshot.go` | `Snapshot`, `SnapshotItem`, `Totals`, `currentMonth`, `monthsUntil`, `Store.Snapshot`(한 달), `Store.Snapshots`(대시보드용 모든 달), 이름 추천(`itemSuggestions`), `Store.SetNote`, 지출과 같이 쓰는 USD 환산(`usdValue`) |
+| `internal/finance/snapshot.go` | `Snapshot`, `SnapshotItem`, `Totals`, `currentMonth`, `monthsUntil`, `Store.Snapshot`(한 달), `Store.Snapshots`(차트용 모든 달), 이름 추천(`itemSuggestions`), `Store.SetNote`, 지출과 같이 쓰는 USD 환산(`usdValue`) |
 | `internal/finance/snapshot_item.go` | `ItemInput`과 `Clean`, `Store.AddItem`/`UpdateItem`/`DeleteItem`/`CopyPreviousSnapshot`, 지출과 같이 쓰는 에러 값 |
-| `internal/finance/snapshot_list.go` | 목록 필터와 정렬(`assetQuery`), 행과 합계(`rowTotal`은 지출 표도 쓴다) |
+| `internal/finance/snapshot_list.go` | 목록 필터와 정렬(`assetQuery`), 표의 행 |
+| `internal/finance/net_worth_chart.go` | 차트 데이터(`newNetWorthChart`) |
 | `internal/finance/summary.go` | 요약(`summarize`), 적용 환율(`appliedRates`, `snapshotRates`). `appliedRates`는 지출 화면도 쓴다 |
 | `internal/finance/exchange_rate.go` | `RunRateUpdates`, `fetchRates`, 환율 저장 |
 | `internal/finance/handler.go` | `NewHandler`와 라우트 |
 | `internal/finance/snapshot_handler.go` | 스냅샷 화면의 핸들러와 페이지 데이터 |
-| `internal/dashboard/handler.go` | 대시보드 페이지와 차트 데이터 |
+| `internal/dashboard/handler.go` | 빈 대시보드 페이지 |
 | `web/static/item_form.js` | 추가 폼에서 추천한 이름을 입력하면 그 종류와 통화를 채운다(잠그지 않는다). 지출 화면도 쓴다 |
-| `web/static/dashboard.js` | 대시보드 차트 |
+| `web/static/net_worth_chart.js` | Assets 화면의 순자산·부채 차트 |
 
 ## 설정
 
@@ -152,14 +158,14 @@ htmx와 `item_form.js`는 이 화면과 지출 화면에서만 불러온다. 스
 - `fetchRates`: `httptest.NewServer`로 정상 응답, `result` 실패, 통화 누락, 0 이하 값, 깨진 JSON, 5xx
 - `ItemInput.Clean`
 - `Snapshot.Totals`, `currentMonth`, `monthsUntil`
-- `parseAssetQuery`, `assetQuery.apply`, `totalOf`, `listURL`
+- `parseAssetQuery`, `assetQuery.apply`, `listURL`
 - `summarize`, `appliedRates`
-- 대시보드 `newPage`
+- `newNetWorthChart`
 
 **HTTP 통합 테스트** (`cmd/server`, 실제 DB)
 
-- `TestFinance`: 가장 가까운 달의 환율로 환산되고 적용 환율이 표시된다. 잘못된 입력은 422다. 메모를 저장하고, 스냅샷 없는 달의 메모는 404다. 같은 이름을 여러 통화로 적을 수 있고, 과거 이름이 추천되되 이번 달에 있는 이름은 빠진다. 빈 달 복사(빈 달을 건너 직전 기록 달을 복사), 행 수정(그 달의 그 행만, 다른 달의 행 id는 GET·POST 모두 404), 삭제(그 행만, 마지막 행이면 그 달의 스냅샷까지), 필터, 범위 밖 월, htmx 요청을 확인한다.
-- `TestDashboard`: 빈 상태, 최신 요약, 차트 JSON.
+- `TestFinance`: 가장 가까운 달의 환율로 환산되고 적용 환율이 표시된다. 잘못된 입력은 422다. 메모를 저장하고, 스냅샷 없는 달의 메모는 404다. 같은 이름을 여러 통화로 적을 수 있고, 과거 이름이 추천되되 이번 달에 있는 이름은 빠진다. 빈 달 복사(빈 달을 건너 직전 기록 달을 복사), 행 수정(그 달의 그 행만, 다른 달의 행 id는 GET·POST 모두 404), 삭제(그 행만, 마지막 행이면 그 달의 스냅샷까지), 필터(합계 행 없음), 월별 차트 JSON, 범위 밖 월, htmx 요청을 확인한다. 메뉴 이름 Assets와 `/finance/assets` 경로도 확인한다.
+- `TestDashboard`: 홈이 대시보드로 가고, 대시보드는 비어 있다.
 
 ## 범위 밖
 

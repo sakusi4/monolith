@@ -3,42 +3,5 @@
 <header>
   <h1>Dashboard</h1>
 </header>
-<article aria-labelledby="finance">
-  <header>
-    <h2 id="finance">Finance</h2>
-    <a href="/finance/snapshots">Snapshots →</a>
-  </header>
-  {{if .Latest.ID}}
-  {{with .Totals}}
-  {{if .Missing}}
-  <p role="alert">Missing exchange rate for {{range $i, $c := .Missing}}{{if $i}}, {{end}}{{$c}}{{end}}.</p>
-  {{else}}
-  <dl>
-    <div>
-      <dt>Net worth</dt>
-      <dd>
-        <strong>{{money "USD" .NetWorth}}</strong>
-        <small>as of {{$.Latest.Month.Format "Jan 2006"}}</small>
-      </dd>
-    </div>
-    <div>
-      <dt>Loans</dt>
-      <dd><strong>{{money "USD" .Loans}}</strong></dd>
-    </div>
-  </dl>
-  {{end}}
-  {{end}}
-  <figure>
-    <figcaption>Net worth and loans by month</figcaption>
-    <div>
-      <canvas id="totals-chart" role="img" aria-label="Line chart of net worth and loans by month"></canvas>
-    </div>
-    <script type="application/json" id="totals-data">{{.Chart}}</script>
-  </figure>
-  {{else}}
-  <p>No snapshots yet. <a href="/finance/snapshots">Add your first snapshot</a>.</p>
-  {{end}}
-</article>
-<script src="/static/chart-4.5.1.umd.min.js" defer></script>
-<script src="/static/dashboard.js" defer></script>
+<p>Nothing here yet.</p>
 {{end}}

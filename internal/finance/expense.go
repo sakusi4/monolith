@@ -107,8 +107,8 @@ func (in ExpenseInput) Clean() (ExpenseInput, error) {
 	return in, nil
 }
 
-// Expenses returns the expenses spent in month by name.
-func (s *Store) Expenses(ctx context.Context, month time.Time) ([]Expense, error) {
+// Expenses returns the expenses spent from from until before to, by name.
+func (s *Store) Expenses(ctx context.Context, from, to time.Time) ([]Expense, error) {
 	query := `
 		SELECT e.id, e.spent_on, e.name, e.category, e.currency, e.amount, r.month, r.per_usd
 		FROM expenses e
@@ -121,7 +121,7 @@ func (s *Store) Expenses(ctx context.Context, month time.Time) ([]Expense, error
 		) r ON true
 		WHERE e.spent_on >= $1 AND e.spent_on < $2
 		ORDER BY lower(e.name), e.id`
-	rows, err := s.db.QueryContext(ctx, query, month, month.AddDate(0, 1, 0))
+	rows, err := s.db.QueryContext(ctx, query, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("query expenses: %w", err)
 	}

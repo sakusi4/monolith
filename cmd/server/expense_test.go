@@ -52,13 +52,21 @@ func TestExpenses(t *testing.T) {
 
 	t.Run("the sidebar links the empty current month, which offers no copy", func(t *testing.T) {
 		got := body(t, "/finance/expenses")
-		for _, want := range []string{`href="/finance/expenses" aria-current="page"`, "No expenses in ", "Add to "} {
+		for _, want := range []string{`href="/finance/expenses" aria-current="page"`, "<h1>Expenses</h1>", `<h2 id="records">Records</h2>`, "No expenses in ", "Add to "} {
 			if !strings.Contains(got, want) {
 				t.Errorf("GET /finance/expenses does not contain %q:\n%s", want, got)
 			}
 		}
-		if strings.Contains(got, "Copy") {
-			t.Errorf("GET /finance/expenses offers to copy a month:\n%s", got)
+		if strings.Contains(got, "Copy") || strings.Contains(got, `<h2 id="trend">`) {
+			t.Errorf("GET /finance/expenses offers to copy a month or shows a trend without expenses:\n%s", got)
+		}
+		i := strings.Index(got, "<legend>Add to")
+		if i < 0 {
+			t.Fatalf("GET /finance/expenses has no add form:\n%s", got)
+		}
+		form := got[i:]
+		if d, c, n := strings.Index(form, "<label>Date"), strings.Index(form, "<label>Category"), strings.Index(form, "<label>Name"); d < 0 || d > c || c > n {
+			t.Errorf("add form fields are not in the order Date, Category, Name:\n%s", form)
 		}
 	})
 
@@ -74,8 +82,14 @@ func TestExpenses(t *testing.T) {
 		add(t, "2025-01-20", "Netflix", "bills", "USD", "15.49")
 		add(t, "2025-01-31", "Refund", "other", "USD", "-5.49")
 		wantContains(t, "/finance/expenses?month=2025-01",
-			"<td>Housing</td>", "<td>Food</td>", "<td>Jan 15</td>", "<td>Jan 31</td>", "AED 2,000.00", "USD 500.00", "KRW 300,000", "USD 300.00", "USD -5.49", "USD 810.00",
+			"<th>Date</th><th>Category</th><th>Name</th>", "<td>Housing</td>", "<td>Food</td>", "<td>Jan 15</td>", "<td>Jan 31</td>", "AED 2,000.00", "USD 500.00", "KRW 300,000", "USD 300.00", "USD -5.49", "USD 810.00",
 			"1 USD = KRW 1,000 (Dec 2024) · AED 4 (Dec 2024)")
+	})
+
+	t.Run("the table has no total row", func(t *testing.T) {
+		if got := body(t, "/finance/expenses?month=2025-01"); strings.Contains(got, `<th scope="row">Total</th>`) {
+			t.Errorf("GET 2025-01 shows a total row under the table:\n%s", got)
+		}
 	})
 
 	t.Run("a name can repeat with its own currency and earlier names are suggested", func(t *testing.T) {
@@ -90,6 +104,11 @@ func TestExpenses(t *testing.T) {
 		if strings.Contains(got, `<option value="Groceries"`) {
 			t.Errorf("GET 2025-02 suggests Groceries, which the month already has")
 		}
+	})
+
+	t.Run("the trend charts each month's total, oldest first, whatever month is shown", func(t *testing.T) {
+		wantContains(t, "/finance/expenses?month=2025-03", `<h2 id="trend">Trend</h2>`,
+			`<script type="application/json" id="spending-data">{"labels":["Jan 2025","Feb 2025"],"totalCents":[81000,11000]}</script>`)
 	})
 
 	t.Run("invalid expenses show the form again", func(t *testing.T) {

@@ -210,13 +210,18 @@ main > header {
   margin-bottom: var(--gap);
 }
 
-main > header label {
+main > header label,
+main > article > header label {
   display: flex;
   align-items: center;
   gap: var(--space-s);
   margin-right: auto;
   color: var(--muted);
   font-weight: 400;
+}
+
+main > article > header form {
+  margin-right: auto;
 }
 
 main > header h1 {
@@ -233,11 +238,11 @@ main > p {
   color: var(--muted);
 }
 
-main > section {
+main section {
   margin-bottom: var(--gap);
 }
 
-main > section > p {
+main section > p {
   margin: var(--space-s) 0 0;
   color: var(--muted);
   font-size: var(--size-small);
@@ -269,7 +274,7 @@ main > article dl > div {
 }
 
 figure {
-  margin: calc(var(--gap) * 2) 0 0;
+  margin: 0;
 }
 
 figcaption {

@@ -26,7 +26,7 @@ type snapshotListPage struct {
 	MonthOpts   web.Filter
 	Filters     web.FilterBar
 	Rows        []snapshotRow
-	Total       rowTotal
+	Chart       netWorthChart
 	Edit        itemForm
 	Add         itemForm
 	Suggestions []itemSuggestion
@@ -99,6 +99,12 @@ func (h *handler) renderList(w http.ResponseWriter, r *http.Request, status int,
 		http.NotFound(w, r)
 		return
 	}
+	snapshots, err := h.store.Snapshots(r.Context())
+	if err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	page.Chart = newNetWorthChart(snapshots)
 	web.Render(w, r, status, "snapshot_list", page)
 }
 
@@ -113,9 +119,8 @@ func newSnapshotListPage(q assetQuery, months []time.Time, suggestions []itemSug
 		Month:       q.Month,
 		Snapshot:    cur,
 		MonthOpts:   monthFilter(months, q.Month),
-		Filters:     web.FilterBar{Action: "/finance/snapshots", Filters: q.filters()},
+		Filters:     web.FilterBar{Action: "/finance/assets", Filters: q.filters()},
 		Rows:        tableRows,
-		Total:       totalOf(rows),
 		Edit:        edit,
 		Add:         view.Add,
 		Suggestions: unusedSuggestions(suggestions, cur),

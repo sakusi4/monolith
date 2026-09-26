@@ -36,7 +36,8 @@ func summarizeExpenses(expenses []Expense) expenseSummary {
 	return s
 }
 
-// expenseRows orders expenses by USD value, largest first, with those without a USD value last.
+// expenseRows orders expenses by date, newest first, and within a date by USD value, largest first,
+// with those without a USD value last.
 func expenseRows(expenses []Expense) []expenseRow {
 	rows := make([]expenseRow, len(expenses))
 	for i, e := range expenses {
@@ -44,6 +45,9 @@ func expenseRows(expenses []Expense) []expenseRow {
 		rows[i].USD, rows[i].HasUSD = e.USD()
 	}
 	slices.SortStableFunc(rows, func(a, b expenseRow) int {
+		if c := b.Expense.Date.Compare(a.Expense.Date); c != 0 {
+			return c
+		}
 		if a.HasUSD != b.HasUSD {
 			if a.HasUSD {
 				return -1
@@ -53,20 +57,6 @@ func expenseRows(expenses []Expense) []expenseRow {
 		return cmp.Compare(b.USD, a.USD)
 	})
 	return rows
-}
-
-func expenseTotalOf(rows []expenseRow) rowTotal {
-	if len(rows) == 0 {
-		return rowTotal{}
-	}
-	t := rowTotal{Currency: rows[0].Expense.Currency, HasAmount: true, HasUSD: true}
-	for _, r := range rows {
-		t.HasAmount = t.HasAmount && r.Expense.Currency == t.Currency
-		t.HasUSD = t.HasUSD && r.HasUSD
-		t.Amount += r.Expense.Amount
-		t.USD += r.USD
-	}
-	return t
 }
 
 func expenseRates(expenses []Expense) []itemRate {
