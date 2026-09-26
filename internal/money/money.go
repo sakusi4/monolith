@@ -82,11 +82,8 @@ func FormatRate(rate *big.Rat) string {
 }
 
 // ToUSD converts amount in c's minor unit to USD cents, rounding half away from zero.
-// perUSD is the number of units of c that one USD buys; it is ignored for USD.
+// perUSD is the number of units of c that one USD buys.
 func ToUSD(c Currency, amount int64, perUSD *big.Rat) int64 {
-	if c == USD {
-		return amount
-	}
 	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(formats[c].decimals)), nil)
 	cents := new(big.Rat).SetFrac(new(big.Int).Mul(big.NewInt(amount), big.NewInt(100)), scale)
 	return round(cents.Quo(cents, perUSD))

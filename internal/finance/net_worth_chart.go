@@ -13,7 +13,7 @@ type netWorthChart struct {
 // newNetWorthChart expects snapshots newest first, as Store.Snapshots returns them.
 // It leaves out months with a missing exchange rate.
 func newNetWorthChart(snapshots []Snapshot) netWorthChart {
-	c := netWorthChart{Labels: []string{}, NetWorthCents: []int64{}, LoansCents: []int64{}}
+	var c netWorthChart
 	for _, s := range slices.Backward(snapshots) {
 		t := s.Totals()
 		if len(t.Missing) == 0 {

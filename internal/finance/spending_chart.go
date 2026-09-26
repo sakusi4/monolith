@@ -20,7 +20,7 @@ func newSpendingChart(expenses []Expense) spendingChart {
 		month := time.Date(e.Date.Year(), e.Date.Month(), 1, 0, 0, 0, 0, time.UTC)
 		byMonth[month] = append(byMonth[month], e)
 	}
-	c := spendingChart{Labels: []string{}, TotalCents: []int64{}}
+	var c spendingChart
 	for _, month := range slices.SortedFunc(maps.Keys(byMonth), time.Time.Compare) {
 		s := summarizeExpenses(byMonth[month])
 		if len(s.Missing) == 0 {
