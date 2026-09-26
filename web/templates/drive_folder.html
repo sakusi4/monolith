@@ -1,0 +1,89 @@
+{{define "title"}}{{.Title}}{{end}}
+{{define "head"}}
+<meta name="htmx-config" content='{"scrollIntoViewOnBoost":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<script src="/static/htmx-2.0.11.min.js" defer></script>
+{{end}}
+{{define "content"}}
+<header>
+  {{with .Parents}}<nav aria-label="Breadcrumb">{{range $i, $c := .}}{{if $i}} / {{end}}<a href="{{$c.URL}}">{{$c.Name}}</a>{{end}}</nav>{{end}}
+  <h1>{{.Title}}</h1>
+  <div class="actions"><a class="button" href="/drive/trash">Trash</a></div>
+</header>
+{{with .Error}}<p role="alert">{{.}}</p>{{end}}
+<form method="post" action="{{.NewFolderURL}}" hx-boost="true">
+  <fieldset>
+    <label>New folder
+      <input name="name" value="{{.NewFolder}}" autocomplete="off" required>
+    </label>
+    <button type="submit">Create</button>
+  </fieldset>
+</form>
+<form method="post" action="{{.UploadURL}}" enctype="multipart/form-data">
+  <fieldset>
+    <label>Files
+      <input type="file" name="files" multiple required>
+    </label>
+    <button type="submit" class="primary">Upload</button>
+  </fieldset>
+</form>
+{{if or .Folders .Files}}
+<table hx-boost="true">
+  <thead>
+    <tr><th>Name</th><th>Kind</th><th class="num">Size</th><th>Modified</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Folders}}
+    {{if .Editing}}{{template "edit-row" $}}{{else}}
+    <tr>
+      <td><a href="{{.URL}}">{{.Folder.Name}}</a></td>
+      <td>Folder</td>
+      <td class="num"></td>
+      <td>{{.Modified}}</td>
+      <td class="actions">
+        <a href="{{.EditURL}}" aria-label="Edit {{.Folder.Name}}">Edit</a>
+        <form method="post" action="{{.DeleteURL}}" hx-confirm="Move {{.Folder.Name}} to the trash?">
+          <button type="submit" class="danger" aria-label="Delete {{.Folder.Name}}">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+    {{end}}
+    {{range .Files}}
+    {{if .Editing}}{{template "edit-row" $}}{{else}}
+    <tr>
+      <td><a href="{{.URL}}" hx-boost="false">{{.File.Name}}</a></td>
+      <td>{{.File.Kind.Label}}</td>
+      <td class="num">{{.Size}}</td>
+      <td>{{.Modified}}</td>
+      <td class="actions">
+        <a href="{{.EditURL}}" aria-label="Edit {{.File.Name}}">Edit</a>
+        <form method="post" action="{{.DeleteURL}}" hx-confirm="Move {{.File.Name}} to the trash?">
+          <button type="submit" class="danger" aria-label="Delete {{.File.Name}}">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>This folder is empty.</p>
+{{end}}
+{{end}}
+{{define "edit-row"}}
+<tr>
+  <td><label><span>Name</span><input name="name" value="{{.Edit.Name}}" form="edit-item" required></label></td>
+  <td colspan="3">
+    <label><span>Folder</span>
+      <select name="folder" form="edit-item">
+        <option value=""{{if not .Edit.Folder}} selected{{end}}>Drive</option>
+        {{range .Targets}}<option value="{{.ID}}"{{if eq .ID $.Edit.Folder}} selected{{end}}>{{.Path}}</option>{{end}}
+      </select>
+    </label>
+  </td>
+  <td class="actions">
+    <form id="edit-item" method="post" action="{{.Edit.URL}}"><button type="submit" class="primary">Save</button></form>
+    <a href="{{.Edit.CancelURL}}">Cancel</a>
+  </td>
+</tr>
+{{end}}

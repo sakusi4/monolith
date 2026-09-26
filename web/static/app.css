@@ -16,6 +16,7 @@
   --space-xl: 24px;
   --space-2xl: 32px;
   --chart-height: 320px;
+  --preview-height: 70vh;
   --sidebar-width: 200px;
   --sidebar-collapsed-width: 40px;
   --tabbar-height: 56px;
@@ -283,6 +284,46 @@ figcaption {
 figure > div {
   position: relative;
   height: var(--chart-height);
+}
+
+main > header nav {
+  display: block;
+  flex-basis: 100%;
+  margin-top: 0;
+  color: var(--muted);
+  font-size: var(--size-small);
+}
+
+main > header button.danger {
+  color: var(--danger);
+}
+
+main > figure {
+  margin-bottom: var(--gap);
+}
+
+figure img,
+figure video,
+figure audio {
+  display: block;
+  max-width: 100%;
+}
+
+figure iframe {
+  width: 100%;
+  height: var(--preview-height);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+figure pre {
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-m);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  font-size: var(--size-small);
 }
 
 dl {

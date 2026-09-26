@@ -10,17 +10,20 @@ import (
 	"time"
 
 	"github.com/sakusi4/monolith/internal/auth"
+	"github.com/sakusi4/monolith/internal/drive"
 	"github.com/sakusi4/monolith/internal/postgres/postgrestest"
 )
 
 const (
-	testEmail    = "me@example.com"
-	testPassword = "correct horse"
+	testEmail     = "me@example.com"
+	testPassword  = "correct horse"
+	testMaxUpload = 1 << 20
 )
 
 type testServer struct {
-	handler http.Handler
-	db      *sql.DB
+	handler  http.Handler
+	db       *sql.DB
+	filesDir string
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -29,7 +32,12 @@ func newTestServer(t *testing.T) *testServer {
 	if err := auth.NewStore(db).SetUser(t.Context(), testEmail, testPassword); err != nil {
 		t.Fatal(err)
 	}
-	return &testServer{handler: routes(db, time.UTC), db: db}
+	filesDir := t.TempDir()
+	driveStore, err := drive.NewStore(db, filesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testServer{handler: routes(db, time.UTC, driveStore, testMaxUpload), db: db, filesDir: filesDir}
 }
 
 func (s *testServer) get(t *testing.T, path string, cookie *http.Cookie) *httptest.ResponseRecorder {

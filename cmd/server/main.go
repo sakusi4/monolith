@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sakusi4/monolith/internal/auth"
+	"github.com/sakusi4/monolith/internal/drive"
 	"github.com/sakusi4/monolith/internal/finance"
 	"github.com/sakusi4/monolith/internal/postgres"
 )
@@ -58,6 +59,11 @@ func run(ctx context.Context) error {
 		}
 	}
 
+	driveStore, err := drive.NewStore(db, cfg.filesDir)
+	if err != nil {
+		return fmt.Errorf("open drive: %w", err)
+	}
+
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	ctx, cancel := context.WithCancel(ctx)
@@ -68,7 +74,7 @@ func run(ctx context.Context) error {
 
 	return serve(ctx, &http.Server{
 		Addr:              cfg.listenAddr,
-		Handler:           routes(db, cfg.location),
+		Handler:           routes(db, cfg.location, driveStore, cfg.maxUpload),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,

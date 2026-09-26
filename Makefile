@@ -17,7 +17,7 @@ dev: db
 		-build.cmd "go build -o tmp/server ./cmd/server" \
 		-build.entrypoint tmp/server \
 		-build.include_ext go,html,css,js,sql \
-		-build.exclude_dir assets,tmp,vendor,testdata,db_data,backup,bin \
+		-build.exclude_dir assets,tmp,vendor,testdata,db_data,files_data,backup,bin \
 		-build.send_interrupt true
 
 test: db

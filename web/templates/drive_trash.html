@@ -1,0 +1,46 @@
+{{define "title"}}Trash{{end}}
+{{define "head"}}
+<meta name="htmx-config" content='{"scrollIntoViewOnBoost":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<script src="/static/htmx-2.0.11.min.js" defer></script>
+{{end}}
+{{define "content"}}
+<header>
+  <nav aria-label="Breadcrumb"><a href="/drive">Drive</a></nav>
+  <h1>Trash</h1>
+  {{if .Rows}}
+  <div class="actions">
+    <form method="post" action="/drive/trash/empty" hx-boost="true" hx-confirm="Delete everything in the trash for good?">
+      <button type="submit" class="danger">Empty trash</button>
+    </form>
+  </div>
+  {{end}}
+</header>
+{{with .Error}}<p role="alert">{{.}}</p>{{end}}
+{{if .Rows}}
+<table hx-boost="true">
+  <thead>
+    <tr><th>Name</th><th>Kind</th><th>Location</th><th>Deleted</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Rows}}
+    <tr>
+      <td>{{.Item.Name}}</td>
+      <td>{{.Item.Kind.Label}}</td>
+      <td>{{.Location}}</td>
+      <td>{{.Deleted}}</td>
+      <td class="actions">
+        <form method="post" action="{{.RestoreURL}}">
+          <button type="submit" aria-label="Restore {{.Item.Name}}">Restore</button>
+        </form>
+        <form method="post" action="{{.DeleteURL}}" hx-confirm="Delete {{.Item.Name}} for good?">
+          <button type="submit" class="danger" aria-label="Delete {{.Item.Name}} for good">Delete forever</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>Trash is empty.</p>
+{{end}}
+{{end}}

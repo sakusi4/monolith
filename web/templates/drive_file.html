@@ -1,0 +1,29 @@
+{{define "title"}}{{.File.Name}}{{end}}
+{{define "content"}}
+<header>
+  <nav aria-label="Breadcrumb">{{range $i, $c := .Parents}}{{if $i}} / {{end}}<a href="{{$c.URL}}">{{$c.Name}}</a>{{end}}</nav>
+  <h1>{{.File.Name}}</h1>
+  <div class="actions">
+    <a class="button" href="{{.DownloadURL}}">Download</a>
+    <a class="button" href="{{.EditURL}}">Rename or move</a>
+    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Move this file to the trash?')">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </div>
+</header>
+<figure>
+  {{if eq .File.Kind "image"}}<img src="{{.ContentURL}}" alt="{{.File.Name}}">
+  {{else if eq .File.Kind "video"}}<video src="{{.ContentURL}}" controls preload="metadata"></video>
+  {{else if eq .File.Kind "audio"}}<audio src="{{.ContentURL}}" controls preload="metadata"></audio>
+  {{else if eq .File.Kind "pdf"}}<iframe src="{{.ContentURL}}" title="{{.File.Name}}"></iframe>
+  {{else if eq .File.Kind "text"}}{{if .TooLarge}}<p>Too large to preview.</p>{{else}}<pre>{{.Text}}</pre>{{end}}
+  {{else}}<p>No preview for this kind of file.</p>
+  {{end}}
+</figure>
+<dl>
+  <div><dt>Kind</dt><dd>{{.File.Kind.Label}}</dd></div>
+  <div><dt>Type</dt><dd>{{.File.ContentType}}</dd></div>
+  <div><dt>Size</dt><dd>{{.Size}}</dd></div>
+  <div><dt>Modified</dt><dd>{{.Modified}}</dd></div>
+</dl>
+{{end}}

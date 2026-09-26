@@ -28,6 +28,8 @@ ADMIN_EMAIL=me@example.com ADMIN_PASSWORD='...' ./bin/server
 | `LISTEN_ADDR` | `:8080` | 서버 주소 |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | 없음 | 로그인 계정. 시작할 때 이 계정을 만들거나 비밀번호를 바꾼다. 둘 다 주거나 둘 다 뺀다 |
 | `TIMEZONE` | `UTC` | "이번 달"을 정하는 시간대(IANA 이름, 예: `Asia/Dubai`) |
+| `FILES_DIR` | `files_data` | Drive 파일 내용을 두는 디렉터리. DB와 함께 백업한다 |
+| `DRIVE_MAX_UPLOAD_GB` | `10` | 업로드 요청 하나의 최대 크기(GiB) |
 
 DB 데이터는 프로젝트의 `db_data/` 폴더에 파일로 남는다(git에는 올라가지 않는다). DB 끄기: `docker compose down`. 데이터까지 지우려면 DB를 끈 뒤 `db_data/`를 지운다.
 

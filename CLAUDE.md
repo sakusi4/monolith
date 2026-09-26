@@ -39,6 +39,7 @@ cmd/server/          실행 파일. 조립만 한다.
 internal/finance/    자산 스냅샷, 지출
 internal/task/       목표, 프로젝트, 태스크
 internal/note/       메모, 태그, 링크
+internal/drive/      폴더와 파일. 파일 내용은 FILES_DIR 디스크에 SHA-256 이름으로 둔다.
 internal/dashboard/  다른 기능 패키지를 읽어 대시보드를 만든다. 쓰기 없음.
 internal/auth/       로그인, 세션, 인증 미들웨어
 internal/postgres/   연결과 마이그레이션. 도메인 쿼리는 두지 않는다.
@@ -65,7 +66,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 
 1. `main` 패키지는 조립만 한다: 설정을 읽고, DB를 열어 마이그레이션을 적용하고, 핸들러를 조립해 서버와 주기 작업을 시작하고, 반환된 에러를 종료 코드로 바꾼다. 분기와 로직은 `internal` 패키지에 둔다.
 2. `main()`은 `run(ctx) error`를 호출하고, 에러를 stderr에 쓴 뒤 `os.Exit(1)`하는 일만 한다. `ctx`는 `signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)`로 만들고, 취소되면 `srv.Shutdown`으로 끝낸다.
-3. 설정은 환경변수로만 받는다(`DATABASE_URL`, `LISTEN_ADDR`, `TIMEZONE` 등). `run`에서 한 번 읽어 타입이 있는 struct로 만들어 아래로 넘긴다. 다른 패키지에서 `os.Getenv`, `flag`를 호출하지 않는다. 테스트 헬퍼 `postgrestest`가 `TEST_DATABASE_URL`을 읽는 것만 예외다.
+3. 설정은 환경변수로만 받는다(`DATABASE_URL`, `LISTEN_ADDR`, `TIMEZONE`, `FILES_DIR` 등). `run`에서 한 번 읽어 타입이 있는 struct로 만들어 아래로 넘긴다. 다른 패키지에서 `os.Getenv`, `flag`를 호출하지 않는다. 테스트 헬퍼 `postgrestest`가 `TEST_DATABASE_URL`을 읽는 것만 예외다.
 4. `os.Exit`, `log.Fatal`은 여기서만 호출한다.
 5. 라우트 마운트(기능 패키지의 핸들러를 경로 prefix에 붙이고 미들웨어를 씌우는 일)는 `cmd/server/routes.go` 한 파일에서 한다. 앱의 전체 URL이 이 파일에서 보인다.
 
