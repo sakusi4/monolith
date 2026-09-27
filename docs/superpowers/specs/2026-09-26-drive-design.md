@@ -155,7 +155,7 @@ htmx는 지출 화면과 같은 방식으로 폴더 화면과 휴지통에서만
 | `internal/postgres/migrations/0010.sql` | `folders`, `blobs`, `files` |
 | `internal/drive/drive.go` | 패키지 문서, `Store`(`*sql.DB`와 내용 저장소) |
 | `internal/drive/blob.go` | 내용 저장소: 해시→경로, 임시 쓰기, rename, 열기, 지우기, 뮤텍스. S3로 바꿀 때 이 파일만 바뀐다 |
-| `internal/drive/folder.go` | `Folder`, 이름 규칙(`cleanName`), 폴더 만들기·이름·이동(순환 검사), 경로(조상 목록) |
+| `internal/drive/folder.go` | `Folder`, 이름 규칙(`CleanName`, 프로젝트 이름도 쓴다), 폴더 만들기(`CreateFolder`는 새 id를 돌려준다)·이름·이동(순환 검사), 이름으로 찾거나 만들기(`EnsureFolder`), 경로(조상 목록) |
 | `internal/drive/file.go` | `File`, 형식 정하기, 미리보기 종류(`Kind`), 강제 다운로드 여부, 업로드·이름·이동 |
 | `internal/drive/trash.go` | 휴지통 목록, 휴지통으로, 복원, 영구 삭제, 비우기, 내용 정리 |
 | `internal/drive/handler.go` | `NewHandler`와 라우트, 공통 도우미(폴더 확인, 에러를 응답으로, 주소, 경로 링크) |
@@ -167,7 +167,7 @@ htmx는 지출 화면과 같은 방식으로 폴더 화면과 휴지통에서만
 | `web/templates/layout.html` | 사이드바 링크 |
 
 - CLAUDE.md 3절의 패키지 목록에 `internal/drive/`를 넣는다.
-- 프로젝트(B)는 나중에 드라이브 폴더 하나를 가리킨다. 드라이브는 프로젝트를 모른다.
+- 프로젝트(`internal/task`)는 드라이브 폴더 하나를 가리키고, 폴더를 `CleanName`, `EnsureFolder`, `CreateFolder`, `UpdateFolder`, `Path`, `Files`, `TrashFolder`와 주소 함수 `FolderURL`, `FileURL`로 다루고, 첨부는 `ReceiveUploads`, `AddFiles`, `Discard`, `FormatSize`로 올리고 보이며, 본문에서 뺀 파일은 `TrashFiles`로 휴지통에 넣는다. 드라이브는 프로젝트를 모른다.
 
 ## 테스트
 
@@ -175,7 +175,7 @@ CLAUDE.md 9절을 따른다. 한 동작은 한 계층에서만 확인한다.
 
 **단위 테스트** (DB 없음)
 
-- `cleanName`: 앞뒤 공백 제거, 분해된 한글의 NFC 합성, 빈 이름, `/` 포함, 255자와 256자
+- `CleanName`: 앞뒤 공백 제거, 분해된 한글의 NFC 합성, 빈 이름, `/` 포함, 255자와 256자
 - 형식 정하기: 표준 확장자(`.png`), 확장자가 없을 때 내용 판별, 둘 다 실패하면 `application/octet-stream`
 - `Kind`: 이미지, 영상, 음성, PDF, 텍스트, 그 밖
 - 강제 다운로드: 목록의 형식(`text/html`), `+xml` 형식(`application/rss+xml`), 해석할 수 없는 형식은 attachment, `image/png`는 아님

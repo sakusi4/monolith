@@ -11,6 +11,7 @@ import (
 
 const (
 	transferTimeout = 2 * time.Hour
+	maxFieldSize    = 1 << 20
 	dateLayout      = "Jan 2, 2006"
 	nameRule        = "Use a name of up to 255 characters without a slash."
 	folderNameTaken = "A folder with that name is already there."
@@ -107,14 +108,14 @@ func pathID(r *http.Request) (int64, bool) {
 	return id, err == nil
 }
 
-func folderURL(id int64) string {
+func FolderURL(id int64) string {
 	if id == 0 {
 		return "/drive"
 	}
 	return "/drive/folders/" + strconv.FormatInt(id, 10)
 }
 
-func fileURL(id int64) string {
+func FileURL(id int64) string {
 	return "/drive/files/" + strconv.FormatInt(id, 10)
 }
 
@@ -127,9 +128,9 @@ func folderQuery(id int64) string {
 
 // crumbs links the top level and then folders, top first.
 func crumbs(folders []Folder) []crumb {
-	out := []crumb{{Name: "Drive", URL: folderURL(0)}}
+	out := []crumb{{Name: "Drive", URL: FolderURL(0)}}
 	for _, f := range folders {
-		out = append(out, crumb{Name: f.Name, URL: folderURL(f.ID)})
+		out = append(out, crumb{Name: f.Name, URL: FolderURL(f.ID)})
 	}
 	return out
 }

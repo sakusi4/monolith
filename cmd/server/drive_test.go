@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"io/fs"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,27 +39,9 @@ func TestDrive(t *testing.T) {
 		t.Helper()
 		return idOf(t, `SELECT id FROM files WHERE name = $1`, name)
 	}
-	multipartBody := func(t *testing.T, files ...[2]string) (*bytes.Buffer, string) {
-		t.Helper()
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		for _, f := range files {
-			part, err := mw.CreateFormFile("files", f[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := part.Write([]byte(f[1])); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := mw.Close(); err != nil {
-			t.Fatal(err)
-		}
-		return &buf, mw.FormDataContentType()
-	}
 	upload := func(t *testing.T, folder string, files ...[2]string) *httptest.ResponseRecorder {
 		t.Helper()
-		body, contentType := multipartBody(t, files...)
+		body, contentType := multipartBody(t, nil, files...)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/drive/files/new?folder="+folder, body)
 		req.Header.Set("Content-Type", contentType)
 		return s.do(t, req, session)
@@ -149,7 +129,7 @@ func TestDrive(t *testing.T) {
 		srv.Config.WriteTimeout = time.Nanosecond
 		srv.Start()
 		t.Cleanup(srv.Close)
-		body, contentType := multipartBody(t, [2]string{"slow.txt", "slow"})
+		body, contentType := multipartBody(t, nil, [2]string{"slow.txt", "slow"})
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/drive/files/new", body)
 		if err != nil {
 			t.Fatal(err)

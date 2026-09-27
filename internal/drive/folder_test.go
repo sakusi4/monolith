@@ -22,9 +22,9 @@ func TestCleanName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := cleanName(tt.in)
+			got, err := CleanName(tt.in)
 			if got != tt.want || !errors.Is(err, tt.wantErr) {
-				t.Errorf("cleanName(%q) = %q, %v, want %q, %v", tt.in, got, err, tt.want, tt.wantErr)
+				t.Errorf("CleanName(%q) = %q, %v, want %q, %v", tt.in, got, err, tt.want, tt.wantErr)
 			}
 		})
 	}

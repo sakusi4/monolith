@@ -3,6 +3,7 @@ package drive
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,9 +27,9 @@ type FolderPath struct {
 	Path string
 }
 
-// cleanName trims name and composes its Unicode (NFC), so that a name typed on one system matches
+// CleanName trims name and composes its Unicode (NFC), so that a name typed on one system matches
 // the same name sent decomposed by another, such as macOS.
-func cleanName(name string) (string, error) {
+func CleanName(name string) (string, error) {
 	name = norm.NFC.String(strings.TrimSpace(name))
 	switch {
 	case name == "":
@@ -150,28 +151,48 @@ func (s *Store) FolderPaths(ctx context.Context, exclude int64) ([]FolderPath, e
 	return paths, nil
 }
 
-// CreateFolder makes a folder named name in parent, or at the top level when parent is 0.
-// It returns ErrInvalidName or ErrNameTaken when the name is not allowed there.
-func (s *Store) CreateFolder(ctx context.Context, parent int64, name string) error {
-	name, err := cleanName(name)
+// CreateFolder makes a folder named name in parent, or at the top level when parent is 0, and
+// returns its id. It returns ErrInvalidName or ErrNameTaken when the name is not allowed there.
+func (s *Store) CreateFolder(ctx context.Context, parent int64, name string) (int64, error) {
+	name, err := CleanName(name)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO folders (parent_id, name) VALUES ($1, $2)`, nullID(parent), name)
+	var id int64
+	err = s.db.QueryRowContext(ctx, `INSERT INTO folders (parent_id, name) VALUES ($1, $2) RETURNING id`, nullID(parent), name).Scan(&id)
 	if isPgError(err, uniqueViolation) {
-		return ErrNameTaken
+		return 0, ErrNameTaken
 	}
 	if err != nil {
-		return fmt.Errorf("insert folder: %w", err)
+		return 0, fmt.Errorf("insert folder: %w", err)
 	}
-	return nil
+	return id, nil
+}
+
+// EnsureFolder returns the folder named name in parent, or at the top level when parent is 0,
+// creating it when there is none outside the trash.
+func (s *Store) EnsureFolder(ctx context.Context, parent int64, name string) (int64, error) {
+	name, err := CleanName(name)
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	query := `SELECT id FROM folders WHERE parent_id IS NOT DISTINCT FROM $1 AND name = $2 AND trashed_at IS NULL`
+	err = s.db.QueryRowContext(ctx, query, nullID(parent), name).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("query folder: %w", err)
+	}
+	return s.CreateFolder(ctx, parent, name)
 }
 
 // UpdateFolder renames id and moves it into parent, or to the top level when parent is 0. It
 // returns ErrMoveIntoItself when parent is id or a folder in it, ErrInvalidName or ErrNameTaken
 // when the name is not allowed there, and ErrNotFound when id is not a folder outside the trash.
 func (s *Store) UpdateFolder(ctx context.Context, id, parent int64, name string) error {
-	name, err := cleanName(name)
+	name, err := CleanName(name)
 	if err != nil {
 		return err
 	}

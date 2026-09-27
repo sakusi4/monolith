@@ -1,0 +1,39 @@
+{{define "title"}}Projects{{end}}
+{{define "head"}}
+<meta name="htmx-config" content='{"scrollIntoViewOnBoost":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<script src="/static/htmx-2.0.11.min.js" defer></script>
+{{end}}
+{{define "content"}}
+<header>
+  <h1>Projects</h1>
+</header>
+{{template "filters" .Filters}}
+<form method="post" action="/task/projects/new">
+  <fieldset>
+    <label>New project
+      <input name="name" value="{{.NewName}}" autocomplete="off" required>
+    </label>
+    <button type="submit" class="primary">Create</button>
+  </fieldset>
+  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
+</form>
+{{if .Rows}}
+<table>
+  <thead>
+    <tr><th>Name</th><th>Status</th><th>Period</th><th class="num">Open tasks</th></tr>
+  </thead>
+  <tbody>
+    {{range .Rows}}
+    <tr>
+      <td><a href="{{.URL}}">{{.Project.Name}}</a></td>
+      <td>{{.Project.Status.Label}}</td>
+      <td>{{.Period}}</td>
+      <td class="num">{{.Project.OpenTasks}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No projects match the filters.</p>
+{{end}}
+{{end}}

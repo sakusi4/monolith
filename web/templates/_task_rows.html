@@ -1,0 +1,75 @@
+{{define "task-add"}}
+<form method="post" action="{{.Add.URL}}" hx-boost="true">
+  <input type="hidden" name="next" value="{{.Next}}">
+  <fieldset>
+    <label>Title
+      <input name="title" value="{{.Add.Title}}" autocomplete="off" required>
+    </label>
+    {{if .ProjectID}}
+    <input type="hidden" name="project" value="{{.ProjectID}}">
+    {{else}}
+    <label>Project
+      <select name="project">
+        <option value="">Inbox</option>
+        {{range .Projects}}<option value="{{.ID}}"{{if eq .ID $.Add.ProjectID}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    {{end}}
+    <label>Due
+      <input type="date" name="due" value="{{.Add.Due}}">
+    </label>
+    <button type="submit" class="primary">Add</button>
+  </fieldset>
+  {{with .Add.Error}}<p role="alert">{{.}}</p>{{end}}
+</form>
+{{end}}
+
+{{define "task-table"}}
+{{if .Rows}}
+<table hx-boost="true">
+  <thead>
+    <tr><th>Task</th>{{if .ShowProject}}<th>Project</th>{{end}}<th>Status</th><th>Due</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range $row := .Rows}}
+    <tr>
+      <td><a href="{{$row.URL}}" hx-boost="false">{{$row.Task.Title}}</a></td>
+      {{if $.ShowProject}}
+      <td>
+        <label><span>Project of {{$row.Task.Title}}</span>
+          <select name="project" form="task-{{$row.Task.ID}}" hx-post="{{$row.FieldsURL}}" hx-include="#task-{{$row.Task.ID}}">
+            <option value="">Inbox</option>
+            {{range $.Projects}}<option value="{{.ID}}"{{if eq .ID $row.Task.ProjectID}} selected{{end}}>{{.Name}}</option>{{end}}
+          </select>
+        </label>
+      </td>
+      {{end}}
+      <td>
+        <label><span>Status of {{$row.Task.Title}}</span>
+          <select name="status" form="task-{{$row.Task.ID}}" hx-post="{{$row.FieldsURL}}" hx-include="#task-{{$row.Task.ID}}">
+            {{range $.Statuses}}<option value="{{.}}"{{if eq . $row.Task.Status}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+      </td>
+      <td{{if $row.Overdue}} class="danger"{{end}}>
+        <label><span>Due of {{$row.Task.Title}}</span>
+          <input type="date" name="due" value="{{$row.Due}}" form="task-{{$row.Task.ID}}" hx-post="{{$row.FieldsURL}}" hx-include="#task-{{$row.Task.ID}}" hx-trigger="blur changed">
+        </label>
+      </td>
+      <td class="actions">
+        <form id="task-{{$row.Task.ID}}" method="post" action="{{$row.FieldsURL}}">
+          <input type="hidden" name="next" value="{{$.Next}}">
+          {{if not $.ShowProject}}<input type="hidden" name="project" value="{{$.ProjectID}}">{{end}}
+          <noscript><button type="submit">Save</button></noscript>
+        </form>
+        <form method="post" action="{{$row.DeleteURL}}" hx-confirm="Delete {{$row.Task.Title}}? Its attachments move to the trash.">
+          <input type="hidden" name="next" value="{{$.Next}}">
+          <button type="submit" class="danger" aria-label="Delete {{$row.Task.Title}}">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+{{end}}

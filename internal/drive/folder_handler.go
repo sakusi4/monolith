@@ -123,26 +123,26 @@ func (h *handler) newFolderPage(id int64, path []Folder, folders []Folder, files
 	edit := view.Edit
 	found := view.EditFolder == 0 && view.EditFile == 0
 	for _, f := range folders {
-		row := folderRow{Folder: f, Modified: h.date(f.UpdatedAt), Editing: f.ID == view.EditFolder, URL: folderURL(f.ID)}
+		row := folderRow{Folder: f, Modified: h.date(f.UpdatedAt), Editing: f.ID == view.EditFolder, URL: FolderURL(f.ID)}
 		row.EditURL, row.DeleteURL = row.URL+"/edit", row.URL+"/delete"
 		if row.Editing {
 			found = true
 			if !edit.Submitted {
 				edit = editForm{Name: f.Name, Folder: f.ParentID}
 			}
-			edit.URL, edit.CancelURL = row.EditURL, folderURL(id)
+			edit.URL, edit.CancelURL = row.EditURL, FolderURL(id)
 		}
 		page.Folders = append(page.Folders, row)
 	}
 	for _, f := range files {
-		row := fileRow{File: f, Size: formatSize(f.Size), Modified: h.date(f.UpdatedAt), Editing: f.ID == view.EditFile, URL: fileURL(f.ID)}
+		row := fileRow{File: f, Size: FormatSize(f.Size), Modified: h.date(f.UpdatedAt), Editing: f.ID == view.EditFile, URL: FileURL(f.ID)}
 		row.EditURL, row.DeleteURL = row.URL+"/edit", row.URL+"/delete"
 		if row.Editing {
 			found = true
 			if !edit.Submitted {
 				edit = editForm{Name: f.Name, Folder: f.FolderID}
 			}
-			edit.URL, edit.CancelURL = row.EditURL, folderURL(id)
+			edit.URL, edit.CancelURL = row.EditURL, FolderURL(id)
 		}
 		page.Files = append(page.Files, row)
 	}
@@ -156,7 +156,7 @@ func (h *handler) createFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PostFormValue("name")
-	err := h.store.CreateFolder(r.Context(), parent, name)
+	_, err := h.store.CreateFolder(r.Context(), parent, name)
 	var problem string
 	switch {
 	case errors.Is(err, ErrInvalidName):
@@ -167,7 +167,7 @@ func (h *handler) createFolder(w http.ResponseWriter, r *http.Request) {
 		web.ServerError(w, r, err)
 		return
 	default:
-		http.Redirect(w, r, folderURL(parent), http.StatusSeeOther)
+		http.Redirect(w, r, FolderURL(parent), http.StatusSeeOther)
 		return
 	}
 	h.renderFolder(w, r, http.StatusUnprocessableEntity, parent, folderView{NewFolder: name, Error: problem})
@@ -215,7 +215,7 @@ func (h *handler) updateFolder(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, err)
 		return
 	default:
-		http.Redirect(w, r, folderURL(form.Folder), http.StatusSeeOther)
+		http.Redirect(w, r, FolderURL(form.Folder), http.StatusSeeOther)
 		return
 	}
 	h.renderFolder(w, r, http.StatusUnprocessableEntity, path[len(path)-1].ParentID, folderView{EditFolder: id, Edit: form, Error: problem})
@@ -236,5 +236,5 @@ func (h *handler) trashFolder(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, folderURL(path[len(path)-1].ParentID), http.StatusSeeOther)
+	http.Redirect(w, r, FolderURL(path[len(path)-1].ParentID), http.StatusSeeOther)
 }

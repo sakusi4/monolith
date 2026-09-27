@@ -1,0 +1,72 @@
+{{define "title"}}{{.Project.Name}}{{end}}
+{{define "head"}}
+<meta name="htmx-config" content='{"scrollIntoViewOnBoost":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<script src="/static/htmx-2.0.11.min.js" defer></script>
+<script src="/static/markdown_editor.js" defer></script>
+{{end}}
+{{define "content"}}
+<header>
+  <nav aria-label="Breadcrumb"><a href="/task/projects">Projects</a></nav>
+  <h1>{{.Project.Name}}</h1>
+  {{if not .Editing}}
+  <div class="actions">
+    <a class="button" href="{{.EditURL}}" hx-boost="true">Edit</a>
+    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this project and its tasks? Its folder moves to the trash.')">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </div>
+  <dl>
+    <div><dt>Status</dt><dd>{{.Project.Status.Label}}</dd></div>
+    {{with .Period}}<div><dt>Period</dt><dd>{{.}}</dd></div>{{end}}
+  </dl>
+  {{end}}
+</header>
+{{with .Error}}<p role="alert">{{.}}</p>{{end}}
+{{if .Editing}}
+<form method="post" action="{{.EditURL}}" enctype="multipart/form-data" hx-boost="true">
+  <fieldset>
+    <label>Name
+      <input name="name" value="{{.Edit.Name}}" autocomplete="off" required>
+    </label>
+    <label>Status
+      <select name="status">
+        {{range .Statuses}}<option value="{{.}}"{{if eq . $.Edit.Status}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <label>Started
+      <input type="date" name="started" value="{{.Edit.Started}}">
+    </label>
+    <label>Finished
+      <input type="date" name="finished" value="{{.Edit.Finished}}">
+    </label>
+  </fieldset>
+  <label>Details
+    <textarea name="body" rows="12" data-attach>{{.Edit.Body}}</textarea>
+  </label>
+  <input type="file" name="files" multiple hidden>
+  <small>Markdown. Paste or drop images into the text to add them; they upload when you save.</small>
+  <div class="actions">
+    <button type="submit" class="primary">Save</button>
+    <a href="{{.URL}}">Cancel</a>
+  </div>
+</form>
+<form method="post" action="{{.FilesURL}}" enctype="multipart/form-data">
+  <fieldset>
+    <label>Attach files (save your changes first)
+      <input type="file" name="files" multiple required>
+    </label>
+    <button type="submit">Attach</button>
+  </fieldset>
+</form>
+{{else}}
+{{with .Project.Body}}<article aria-label="Details">{{markdown .}}</article>{{end}}
+{{end}}
+<section aria-labelledby="tasks">
+  <h2 id="tasks">Open tasks</h2>
+  {{template "task-add" .Tasks}}
+  {{template "task-table" .Tasks}}
+  {{if not .Tasks.Rows}}<p>No open tasks.</p>{{end}}
+  <p><a href="{{.AllTasksURL}}">All tasks of this project</a></p>
+</section>
+{{template "attachments" .Attachments}}
+{{end}}

@@ -112,7 +112,7 @@ func mustDownload(contentType string) bool {
 	return err != nil || slices.Contains(scriptableTypes, mediaType) || strings.HasSuffix(mediaType, "+xml")
 }
 
-func formatSize(n int64) string {
+func FormatSize(n int64) string {
 	if n < sizeUnit {
 		return fmt.Sprintf("%d B", n)
 	}
@@ -211,14 +211,14 @@ func (s *Store) Discard(uploads []Upload) error {
 	return errors.Join(errs...)
 }
 
-// AddFiles adds all uploads to folder, or to the top level when folder is 0, or on error none of
-// them. It returns ErrInvalidName or ErrNameTaken when a name is not allowed there. It uses up the
-// staged content either way.
-func (s *Store) AddFiles(ctx context.Context, folder int64, uploads []Upload) error {
+// AddFiles adds all uploads to folder, or to the top level when folder is 0, and returns the files
+// added in the order of uploads; on error it adds none of them. It returns ErrInvalidName or ErrNameTaken when a name is not
+// allowed there. It uses up the staged content either way.
+func (s *Store) AddFiles(ctx context.Context, folder int64, uploads []Upload) ([]File, error) {
 	for i := range uploads {
-		name, err := cleanName(uploads[i].Name)
+		name, err := CleanName(uploads[i].Name)
 		if err != nil {
-			return errors.Join(err, s.Discard(uploads))
+			return nil, errors.Join(err, s.Discard(uploads))
 		}
 		uploads[i].Name = name
 	}
@@ -228,19 +228,20 @@ func (s *Store) AddFiles(ctx context.Context, folder int64, uploads []Upload) er
 	for i, u := range uploads {
 		isNew, err := s.blobs.keep(u.blob)
 		if err != nil {
-			return errors.Join(err, s.Discard(uploads[i:]), s.removeBlobs(created))
+			return nil, errors.Join(err, s.Discard(uploads[i:]), s.removeBlobs(created))
 		}
 		if isNew {
 			created = append(created, u.blob.sum)
 		}
 	}
-	if err := s.insertFiles(ctx, folder, uploads); err != nil {
-		return errors.Join(err, s.removeBlobs(created))
+	files, err := s.insertFiles(ctx, folder, uploads)
+	if err != nil {
+		return nil, errors.Join(err, s.removeBlobs(created))
 	}
-	return nil
+	return files, nil
 }
 
-func (s *Store) insertFiles(ctx context.Context, folder int64, uploads []Upload) error {
+func (s *Store) insertFiles(ctx context.Context, folder int64, uploads []Upload) ([]File, error) {
 	sums := make([][]byte, len(uploads))
 	sizes := make([]int64, len(uploads))
 	names := make([]string, len(uploads))
@@ -250,7 +251,7 @@ func (s *Store) insertFiles(ctx context.Context, folder int64, uploads []Upload)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin: %w", err)
+		return nil, fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
 	query := `
@@ -258,23 +259,45 @@ func (s *Store) insertFiles(ctx context.Context, folder int64, uploads []Upload)
 		SELECT u.sha256, u.size FROM unnest($1::bytea[], $2::bigint[]) AS u(sha256, size)
 		ON CONFLICT DO NOTHING`
 	if _, err := tx.ExecContext(ctx, query, sums, sizes); err != nil {
-		return fmt.Errorf("insert blobs: %w", err)
+		return nil, fmt.Errorf("insert blobs: %w", err)
 	}
 	query = `
 		INSERT INTO files (folder_id, name, sha256, content_type)
 		SELECT $1::bigint, u.name, u.sha256, u.content_type
-		FROM unnest($2::text[], $3::bytea[], $4::text[]) AS u(name, sha256, content_type)`
-	_, err = tx.ExecContext(ctx, query, nullID(folder), names, sums, types)
+		FROM unnest($2::text[], $3::bytea[], $4::text[]) AS u(name, sha256, content_type)
+		RETURNING id, name, content_type, sha256, updated_at`
+	rows, err := tx.QueryContext(ctx, query, nullID(folder), names, sums, types)
 	if isPgError(err, uniqueViolation) {
-		return ErrNameTaken
+		return nil, ErrNameTaken
 	}
 	if err != nil {
-		return fmt.Errorf("insert files: %w", err)
+		return nil, fmt.Errorf("insert files: %w", err)
+	}
+	defer rows.Close()
+	added := make(map[string]File, len(uploads))
+	for rows.Next() {
+		f := File{FolderID: folder}
+		if err := rows.Scan(&f.ID, &f.Name, &f.ContentType, &f.SHA256, &f.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan file: %w", err)
+		}
+		added[f.Name] = f
+	}
+	err = rows.Err()
+	if isPgError(err, uniqueViolation) {
+		return nil, ErrNameTaken
+	}
+	if err != nil {
+		return nil, fmt.Errorf("insert files: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return nil, fmt.Errorf("commit: %w", err)
 	}
-	return nil
+	files := make([]File, len(uploads))
+	for i, u := range uploads {
+		files[i] = added[u.Name]
+		files[i].Size = u.blob.size
+	}
+	return files, nil
 }
 
 func (s *Store) removeBlobs(sums [][]byte) error {
@@ -294,7 +317,7 @@ func (s *Store) Open(f File) (*os.File, error) {
 // ErrInvalidName or ErrNameTaken when the name is not allowed there, and ErrNotFound when id is not
 // a file outside the trash.
 func (s *Store) UpdateFile(ctx context.Context, id, folder int64, name string) error {
-	name, err := cleanName(name)
+	name, err := CleanName(name)
 	if err != nil {
 		return err
 	}

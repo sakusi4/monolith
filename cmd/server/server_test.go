@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -94,4 +96,32 @@ func TestCrossSitePostIsRejected(t *testing.T) {
 	if rec := s.do(t, req, nil); rec.Code != http.StatusForbidden {
 		t.Errorf("cross-site POST /auth/login = %d, want 403", rec.Code)
 	}
+}
+
+// multipartBody builds a multipart body with the fields and one "files" part for each name and
+// content pair.
+func multipartBody(t *testing.T, fields url.Values, files ...[2]string) (*bytes.Buffer, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for name, values := range fields {
+		for _, v := range values {
+			if err := mw.WriteField(name, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, f := range files {
+		part, err := mw.CreateFormFile("files", f[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte(f[1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return &buf, mw.FormDataContentType()
 }

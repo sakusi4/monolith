@@ -233,6 +233,7 @@ main > header .actions {
 
 main > p {
   color: var(--muted);
+  white-space: pre-line;
 }
 
 main section {
@@ -292,6 +293,26 @@ main > header nav {
   margin-top: 0;
   color: var(--muted);
   font-size: var(--size-small);
+}
+
+main > header dl {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-xl);
+}
+
+main > header dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+main > header dd {
+  margin: 0;
 }
 
 main > header button.danger {
@@ -434,6 +455,48 @@ label input,
 label select {
   width: 100%;
   font-weight: 400;
+}
+
+textarea {
+  width: 100%;
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+form > small {
+  color: var(--muted);
+  font-size: var(--size-small);
+}
+
+main > article img {
+  max-width: 100%;
+}
+
+main > article li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+
+main > article pre {
+  overflow: auto;
+  padding: var(--space-m);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  font-size: var(--size-small);
+}
+
+td.danger,
+td.danger input {
+  color: var(--danger);
+}
+
+td small,
+main li small {
+  color: var(--muted);
+  font-size: var(--size-small);
 }
 
 select {
@@ -689,6 +752,10 @@ body:not(:has(> aside)) button {
   td:not(:first-child, .num, .actions) {
     color: var(--muted);
     font-size: var(--size-small);
+  }
+
+  td.danger {
+    color: var(--danger);
   }
 
   td.num,

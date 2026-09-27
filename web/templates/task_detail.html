@@ -1,0 +1,24 @@
+{{define "title"}}{{.Task.Title}}{{end}}
+{{define "content"}}
+<header>
+  <nav aria-label="Breadcrumb"><a href="/task/tasks">Tasks</a>{{with .ProjectURL}} / <a href="{{.}}">{{$.Task.ProjectName}}</a>{{end}}</nav>
+  <h1>{{.Task.Title}}</h1>
+  <div class="actions">
+    <a class="button" href="{{.EditURL}}">Edit</a>
+    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this task? Its attachments move to the trash.')">
+      <input type="hidden" name="next" value="/task/tasks">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </div>
+  <dl>
+    <div><dt>Project</dt><dd>{{with .ProjectURL}}<a href="{{.}}">{{$.Task.ProjectName}}</a>{{else}}Inbox{{end}}</dd></div>
+    <div><dt>Status</dt><dd>{{.Task.Status.Label}}</dd></div>
+    {{with .Due}}<div><dt>Due</dt><dd>{{.}}</dd></div>{{end}}
+    {{with .Completed}}<div><dt>Completed</dt><dd>{{.}}</dd></div>{{end}}
+  </dl>
+</header>
+<article aria-label="Details">
+  {{with .Task.Body}}{{markdown .}}{{else}}<p>No details.</p>{{end}}
+</article>
+{{template "attachments" .Attachments}}
+{{end}}
