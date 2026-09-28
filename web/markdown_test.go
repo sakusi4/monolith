@@ -14,6 +14,8 @@ func TestRenderMarkdown(t *testing.T) {
 	}{
 		{"a task list gets checkboxes", "- [x] passport", `type="checkbox"`, ""},
 		{"a table", "| a |\n|---|\n| 1 |", "<table>", ""},
+		{"two tildes strike through", "~~old~~", "<del>old</del>", ""},
+		{"a single tilde stays text", "4~5 hours, 2~3 months", "4~5 hours, 2~3 months", "<del>"},
 		{"headings move one level down", "# Plan", "<h2", "<h1"},
 		{"raw HTML is left out", "<script>alert(1)</script>", "", "<script>"},
 		{"an unsafe link keeps no target", "[x](javascript:alert(1))", "", "javascript:"},
