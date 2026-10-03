@@ -58,6 +58,7 @@ func Render(w http.ResponseWriter, r *http.Request, status int, page string, dat
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if _, err := buf.WriteTo(w); err != nil {
 		slog.WarnContext(r.Context(), "write response", slog.Any("error", err))

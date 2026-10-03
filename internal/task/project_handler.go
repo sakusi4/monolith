@@ -42,8 +42,17 @@ type projectPage struct {
 // add or a change in the task table that failed.
 type projectView struct {
 	FieldsError string
+	Fields      projectFields
 	Error       string
 	Add         addForm
+}
+
+// projectFields is the status and dates of a change of a project's fields that failed, shown again
+// in place of the saved ones.
+type projectFields struct {
+	Status   ProjectStatus
+	Started  string
+	Finished string
 }
 
 func (h *handler) listProjects(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +149,9 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 		FieldsURL:   u + "/fields",
 		DeleteURL:   u + "/delete",
 	}
+	if view.FieldsError != "" {
+		screen.Project.Status, screen.Started, screen.Finished = view.Fields.Status, view.Fields.Started, view.Fields.Finished
+	}
 	web.Render(w, r, status, "project_detail", screen)
 }
 
@@ -149,16 +161,17 @@ func (h *handler) updateProjectFields(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	started, okStarted := parseDate(r.PostFormValue("started"))
-	finished, okFinished := parseDate(r.PostFormValue("finished"))
+	fields := projectFields{Status: ProjectStatus(r.PostFormValue("status")), Started: r.PostFormValue("started"), Finished: r.PostFormValue("finished")}
+	started, okStarted := parseDate(fields.Started)
+	finished, okFinished := parseDate(fields.Finished)
 	if !okStarted || !okFinished {
-		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{FieldsError: dateProblem})
+		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{FieldsError: dateProblem, Fields: fields})
 		return
 	}
-	err := h.store.UpdateProjectFields(r.Context(), id, ProjectStatus(r.PostFormValue("status")), started, finished)
+	err := h.store.UpdateProjectFields(r.Context(), id, fields.Status, started, finished)
 	switch {
 	case errors.Is(err, ErrInvalidProject):
-		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{FieldsError: fieldsProblem})
+		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{FieldsError: fieldsProblem, Fields: fields})
 	case err != nil:
 		respondError(w, r, err)
 	default:

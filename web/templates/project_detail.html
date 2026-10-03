@@ -14,7 +14,7 @@
     </form>
   </div>
 </header>
-<form id="project-fields" method="post" action="{{.FieldsURL}}" hx-target="#project-fields" hx-select="#project-fields" hx-swap="outerHTML">
+<form method="post" action="{{.FieldsURL}}" hx-target="#project-fields-status" hx-select="#project-fields-status" hx-swap="outerHTML">
   <fieldset>
     <label>Status
       <select hx-post="{{$.FieldsURL}}" name="status">
@@ -29,7 +29,9 @@
     </label>
     <noscript><button type="submit">Save</button></noscript>
   </fieldset>
-  {{with .FieldsError}}<p role="alert">{{.}}</p>{{end}}
+  <div id="project-fields-status">
+    {{with .FieldsError}}<p role="alert">{{.}}</p>{{end}}
+  </div>
 </form>
 {{template "editor" .Editor}}
 {{template "backlinks" .Backlinks}}

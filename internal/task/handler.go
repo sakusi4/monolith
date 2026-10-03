@@ -14,19 +14,20 @@ import (
 )
 
 const (
-	projectsURL      = "/task/projects"
-	dateLayout       = "Jan 2, 2006"
-	taskProblem      = "Enter a title, and pick the project and status from the lists."
-	titleProblem     = "Enter a title."
-	fieldsProblem    = "Pick a status from the list and dates in order."
-	dueProblem       = "Enter the due date as YYYY-MM-DD."
-	projectProblem   = "Use a name of up to 255 characters without a slash, a status from the list, and dates in order."
-	nameProblem      = "Use a name of up to 255 characters without a slash."
-	nameTakenProblem = "A project with that name already exists."
-	dateProblem      = "Enter dates as YYYY-MM-DD."
-	noFolderProblem  = "The project's folder is missing or in the trash."
-	fileNameProblem  = "A file with that name is already attached."
-	fileNameRule     = "Use file names of up to 255 characters without a slash."
+	projectsURL       = "/task/projects"
+	dateLayout        = "Jan 2, 2006"
+	taskProblem       = "Enter a title, and pick the project and status from the lists."
+	titleProblem      = "Enter a title."
+	taskFieldsProblem = "Pick the project and status from the lists."
+	fieldsProblem     = "Pick a status from the list and dates in order."
+	dueProblem        = "Enter the due date as YYYY-MM-DD."
+	projectProblem    = "Use a name of up to 255 characters without a slash, a status from the list, and dates in order."
+	nameProblem       = "Use a name of up to 255 characters without a slash."
+	nameTakenProblem  = "A project with that name already exists."
+	dateProblem       = "Enter dates as YYYY-MM-DD."
+	noFolderProblem   = "The project's folder is missing or in the trash."
+	fileNameProblem   = "A file with that name is already attached."
+	fileNameRule      = "Use file names of up to 255 characters without a slash."
 )
 
 type handler struct {

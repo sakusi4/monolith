@@ -58,8 +58,9 @@ func (s *Store) TrashedPages(ctx context.Context) ([]TrashedPage, error) {
 	return pages, nil
 }
 
-// Restore takes page id out of the trash. It returns ErrParentTrashed when the page it was under is
-// in the trash, and ErrNotFound when id is not a page in the trash.
+// Restore takes page id out of the trash and moves its drive folder into Pages, where a project or task
+// that is gone left it elsewhere. It returns ErrParentTrashed when the page it was under is in the
+// trash, and ErrNotFound when id is not a page in the trash.
 func (s *Store) Restore(ctx context.Context, id int64) error {
 	var parent sql.Null[int64]
 	err := s.db.QueryRowContext(ctx, `SELECT parent_id FROM pages WHERE id = $1 AND trashed_at IS NOT NULL`, id).Scan(&parent)
@@ -81,7 +82,11 @@ func (s *Store) Restore(ctx context.Context, id int64) error {
 	if _, err := s.db.ExecContext(ctx, `UPDATE pages SET trashed_at = NULL WHERE id = $1`, id); err != nil {
 		return fmt.Errorf("restore page: %w", err)
 	}
-	return nil
+	p, err := s.Page(ctx, id)
+	if err != nil {
+		return err
+	}
+	return s.moveFolderToPages(ctx, p)
 }
 
 // Delete removes page id, which is in the trash, and the pages under it for good, and moves their

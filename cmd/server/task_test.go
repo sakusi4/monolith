@@ -358,6 +358,36 @@ func TestTasks(t *testing.T) {
 		}
 	})
 
+	t.Run("a restored task page keeps its files when its old project is purged", func(t *testing.T) {
+		rec := s.post(t, "/task/projects/new", url.Values{"name": {"Alpha"}}, session)
+		alpha := projectID(t, "Alpha")
+		wantRedirect(t, rec, "/task/projects/"+alpha)
+		addTask(t, "Ship", alpha, "")
+		ship := taskID(t, "Ship")
+		rec = send(t, "/task/tasks/"+ship+"/images", nil, [2]string{"plan.txt", "plan"})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("upload = %d, want 201", rec.Code)
+		}
+		file := rec.Header().Get("Location")
+		shipPage := idOf(t, `SELECT id FROM pages WHERE task_id = $1`, ship)
+		alphaPage := idOf(t, `SELECT id FROM pages WHERE project_id = $1`, alpha)
+		wantRedirect(t, s.post(t, "/task/tasks/"+ship+"/delete", url.Values{"next": {"/task/tasks"}}, session), "/task/tasks")
+		wantRedirect(t, s.post(t, "/page/trash/"+shipPage+"/restore", nil, session), "/page/trash")
+		wantRedirect(t, s.post(t, "/task/projects/"+alpha+"/delete", nil, session), "/task/projects")
+		wantRedirect(t, s.post(t, "/page/trash/"+alphaPage+"/delete", nil, session), "/page/trash")
+		if rec := s.get(t, file+"/content", session); rec.Code != http.StatusOK {
+			t.Errorf("GET a file of the restored page after its old project was purged = %d, want 200", rec.Code)
+		}
+	})
+
+	t.Run("a project's fields keep what was entered when they are rejected", func(t *testing.T) {
+		heriot := projectID(t, "Heriot-Watt MSc")
+		rec := s.post(t, "/task/projects/"+heriot+"/fields", url.Values{"status": {"active"}, "started": {"2026-05-10"}, "finished": {"2026-05-01"}}, session)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `value="2026-05-10"`) || !strings.Contains(rec.Body.String(), `value="2026-05-01"`) {
+			t.Errorf("finished before started = %d, want 422 with the entered dates:\n%s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("bad input is rejected", func(t *testing.T) {
 		if rec := s.get(t, "/task/tasks?status=later", session); rec.Code != http.StatusBadRequest {
 			t.Errorf("GET with an unknown status = %d, want 400", rec.Code)

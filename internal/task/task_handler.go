@@ -196,7 +196,7 @@ func (h *handler) updateTaskFields(w http.ResponseWriter, r *http.Request) {
 	err := h.store.UpdateTaskFields(r.Context(), id, project, TaskStatus(r.PostFormValue("status")), due)
 	switch {
 	case errors.Is(err, ErrInvalidTask):
-		h.renderNext(w, r, http.StatusUnprocessableEntity, next, addForm{}, taskProblem)
+		h.renderNext(w, r, http.StatusUnprocessableEntity, next, addForm{}, taskFieldsProblem)
 	case attachProblem(err) != "":
 		h.renderNext(w, r, http.StatusUnprocessableEntity, next, addForm{}, attachProblem(err))
 	case err != nil:

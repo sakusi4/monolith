@@ -22,6 +22,7 @@ import (
 
 const (
 	uniqueViolation = "23505"
+	moveLock        = 1
 	pagesURL        = "/page"
 	projectsURL     = "/task/projects"
 	tasksURL        = "/task/tasks"
@@ -234,7 +235,7 @@ func (s *Store) writeContent(ctx context.Context, id int64, title, body string, 
 		RETURNING updated_at`
 	err = tx.QueryRowContext(ctx, query, id, title, body, version).Scan(&saved)
 	if errors.Is(err, sql.ErrNoRows) {
-		return time.Time{}, ErrStale
+		return s.savedAs(ctx, id, title, body)
 	}
 	if isPgError(err, uniqueViolation) {
 		return time.Time{}, ErrTitleTaken
@@ -251,10 +252,31 @@ func (s *Store) writeContent(ctx context.Context, id int64, title, body string, 
 	return saved, nil
 }
 
+// savedAs returns when page id was last saved if it holds title and body already. It returns ErrStale
+// when it holds something else, and ErrNotFound when it is gone or in the trash.
+func (s *Store) savedAs(ctx context.Context, id int64, title, body string) (time.Time, error) {
+	var (
+		saved time.Time
+		same  bool
+	)
+	query := `SELECT updated_at, title = $2 AND body = $3 FROM pages WHERE id = $1 AND trashed_at IS NULL`
+	err := s.db.QueryRowContext(ctx, query, id, title, body).Scan(&saved, &same)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, ErrNotFound
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("query page: %w", err)
+	}
+	if !same {
+		return time.Time{}, ErrStale
+	}
+	return saved, nil
+}
+
 // Move puts page id, a page of its own, under parent, or at the top level when parent is 0, without
 // changing its version. It returns ErrInvalidParent when parent is id, a page under it, or not a
 // page outside the trash, or when id belongs to a project or task, and ErrNotFound when there is no
-// such page.
+// such page. Moves run one at a time, so two moves at once cannot put two pages under each other.
 func (s *Store) Move(ctx context.Context, id, parent int64) error {
 	p, err := s.Page(ctx, id)
 	if err != nil {
@@ -262,6 +284,14 @@ func (s *Store) Move(ctx context.Context, id, parent int64) error {
 	}
 	if p.Owner != (Owner{}) {
 		return fmt.Errorf("%w: the page of a project or task stays at the top", ErrInvalidParent)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, moveLock); err != nil {
+		return fmt.Errorf("lock page moves: %w", err)
 	}
 	if parent != 0 {
 		ok, err := s.isVisibleOutside(ctx, parent, id)
@@ -272,8 +302,11 @@ func (s *Store) Move(ctx context.Context, id, parent int64) error {
 			return fmt.Errorf("%w: %d", ErrInvalidParent, parent)
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE pages SET parent_id = $2 WHERE id = $1`, id, nullID(parent)); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE pages SET parent_id = $2 WHERE id = $1`, id, nullID(parent)); err != nil {
 		return fmt.Errorf("move page: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 	return nil
 }

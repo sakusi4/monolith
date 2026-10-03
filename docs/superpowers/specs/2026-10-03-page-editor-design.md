@@ -14,8 +14,8 @@
 | 빌드 | `web/editor/`에서 Node와 esbuild로 JS 하나와 CSS 하나로 빌드하고 결과(`web/static/editor-7.22.2.js`, `.css`)를 커밋한다. Node는 이 빌드에만 쓴다. Go 빌드, 테스트, 실행에는 필요 없다 |
 | 데이터 보존 설정 | 기본 설정으로는 데이터를 잃는다. 제목 없는 이미지(`![a](url)`)는 이미지 속성 검증(`validate: "string"`)에 걸려 버려지므로 remark 플러그인이 `title`을 `''`로 채운다. ImageBlock 기능은 alt에 크기 비율을 써넣으므로 쓰지 않는다. GFM의 단일 `~` 취소선(`4~5 … 7~8`)은 끈다(`singleTilde: false`) |
 | 기능 | `CrepeBuilder`로 블록 편집(`/` 메뉴, 손잡이), 선택 툴바, 링크 툴팁, 목록, 표, 코드 블록, 커서, 자리표시 글만 넣는다. 수식, AI, TopBar, ImageBlock은 넣지 않는다 |
-| 자동 저장 | 마지막 변경 후 1초 뒤 저장한다. 저장 중에 또 바뀌면 끝난 뒤 한 번 더 보낸다. 저장 요청은 크기가 맞으면 늘 `keepalive`로 보내 떠나도 끝까지 간다. 탭을 숨기거나 떠날 때 마지막 요청을 보낸다. 저장이 오가는 중에 새로 바뀐 글이 있거나 글이 `keepalive` 한도보다 크면 떠나기 전에 브라우저가 묻는다 |
-| 충돌 | 저장 요청은 읽은 버전(`pages.updated_at`)을 같이 보낸다. 그새 다른 곳에서 저장됐으면 409이고, 편집기는 자동 저장을 멈추고 새로고침하라고 보인다 |
+| 자동 저장 | 마지막 변경 후 1초 뒤 저장한다. 저장 중에 또 바뀌면 끝난 뒤 한 번 더 보낸다. 저장 요청은 크기가 맞으면 늘 `keepalive`로 보내 떠나도 끝까지 간다. 탭을 숨기거나 떠날 때 마지막 요청을 보낸다. 떠나기 전에 브라우저가 묻는 경우: 저장이 오가는 중에 새로 바뀐 글이 있을 때, 글이 `keepalive` 한도보다 클 때, 마지막 저장이 실패했거나 멈췄을 때(5xx, 네트워크, 로그아웃, 404, 409), 파일을 올리는 중일 때. 결과를 모르는 저장(네트워크 오류, 5xx)은 다음에 같은 내용을 같은 버전으로 다시 보낸 뒤 새 글을 보낸다. 화면 HTML은 `Cache-Control: no-store`로 보내 뒤로 가기가 옛 버전을 보이지 않는다 |
+| 충돌 | 저장 요청은 읽은 버전(`pages.updated_at`)을 같이 보낸다. 그새 다른 곳에서 저장됐으면 409이고, 편집기는 자동 저장을 멈추고 새로고침하라고 보인다. 버전이 다르더라도 페이지가 보낸 제목과 본문을 이미 갖고 있으면(이미 들어간 저장을 다시 보낸 경우) 204와 지금 버전으로 답한다. 휴지통에 있으면 404다 |
 | 제목 | 화면 맨 위 `<h1>` 안의 입력칸. 본문과 같은 요청으로 자동 저장한다. 비어 있는 동안은 마지막으로 저장된 제목으로 본문만 저장하고 상태에 "Saved. Enter a title."를 보인다 |
 | 하위 페이지 | `[[`나 `/page`로 만들면 그 자리에서 서버에 만들고 링크를 넣는다. 만드는 동안 이어 쓴 글은 그대로 둔다. 고르기 창은 지금 편집하는 페이지를 내놓지 않는다. 서버의 `[[제목]]` 변환은 없앤다 |
 | 링크 글자 | 링크를 넣을 때의 제목이다. 페이지 이름을 바꿔도 링크 글자는 그대로다 |
@@ -44,11 +44,11 @@
 
 ### 할 일 화면 (`task_detail.html`)
 
-경로, 제목 입력칸, Delete, 칸 묶음(Project, Status, Due, Completed), 편집기, Pages·Linked from, Attachments와 Attach files 폼. 칸 묶음은 바꾸는 즉시 `POST /task/tasks/{id}/fields`(`next`는 이 화면)로 저장한다. htmx로 보내 응답에서 칸 묶음만 바꿔 끼우므로 편집기는 다시 그려지지 않는다. JS가 없으면 `<noscript>` Save 버튼으로 보낸다.
+경로, 제목 입력칸, Delete, 칸 묶음(Project, Status, Due, Completed), 편집기, Pages·Linked from, Attachments와 Attach files 폼. 칸 묶음은 바꾸는 즉시 `POST /task/tasks/{id}/fields`(`next`는 이 화면)로 저장한다. htmx로 보내 응답에서 칸 아래의 상태 영역(Completed, 오류 문구)과 경로만 바꿔 끼우므로 편집기와 입력 중인 칸, 포커스는 그대로다. JS가 없으면 `<noscript>` Save 버튼으로 보낸다.
 
 ### 프로젝트 화면 (`project_detail.html`)
 
-경로, 제목 입력칸, Delete, 칸 묶음(Status, Started, Finished), 편집기, Pages·Linked from, Open tasks, Attachments와 Attach files 폼. 칸 묶음은 `POST /task/projects/{id}/fields`로 할 일과 같은 방식으로 저장한다.
+경로, 제목 입력칸, Delete, 칸 묶음(Status, Started, Finished), 편집기, Pages·Linked from, Open tasks, Attachments와 Attach files 폼. 칸 묶음은 `POST /task/projects/{id}/fields`로 할 일과 같은 방식으로 저장한다(상태 영역만 바꿔 끼운다). 거절되면 422로 입력한 상태와 날짜를 그대로 다시 보인다.
 
 ## 편집기 동작
 

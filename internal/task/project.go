@@ -240,7 +240,7 @@ func (s *Store) SaveProjectContent(ctx context.Context, id int64, name, body str
 		return time.Time{}, ErrNameTaken
 	}
 	if !cur.PageUpdatedAt.Equal(version) {
-		return time.Time{}, page.ErrStale
+		return s.pages.SaveContent(ctx, cur.PageID, name, body, version)
 	}
 	if name != cur.Name && cur.FolderID != 0 {
 		if err := s.renameFolder(ctx, cur.FolderID, name); err != nil {

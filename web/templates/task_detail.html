@@ -6,7 +6,7 @@
 {{end}}
 {{define "content"}}
 <header>
-  <nav aria-label="Breadcrumb"><a href="/task/tasks">Tasks</a>{{with .ProjectURL}} / <a href="{{.}}">{{$.Task.ProjectName}}</a>{{end}}</nav>
+  <nav aria-label="Breadcrumb" id="task-path"><a href="/task/tasks">Tasks</a>{{with .ProjectURL}} / <a href="{{.}}">{{$.Task.ProjectName}}</a>{{end}}</nav>
   {{template "editor-title" .Editor}}
   <div class="actions">
     <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this task? Its page moves to the page trash.')">
@@ -15,7 +15,7 @@
     </form>
   </div>
 </header>
-<form id="task-fields" method="post" action="{{.FieldsURL}}" hx-target="#task-fields" hx-select="#task-fields" hx-swap="outerHTML">
+<form method="post" action="{{.FieldsURL}}" hx-target="#task-fields-status" hx-select="#task-fields-status" hx-select-oob="#task-path" hx-swap="outerHTML">
   <input type="hidden" name="next" value="{{.URL}}">
   <fieldset>
     <label>Project
@@ -32,10 +32,12 @@
     <label>Due
       <input type="date" hx-post="{{$.FieldsURL}}" hx-trigger="blur changed" name="due" value="{{.Due}}">
     </label>
-    {{with .Completed}}<p>Completed {{.}}</p>{{end}}
     <noscript><button type="submit">Save</button></noscript>
   </fieldset>
-  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
+  <div id="task-fields-status">
+    {{with .Completed}}<p>Completed {{.}}</p>{{end}}
+    {{with .Error}}<p role="alert">{{.}}</p>{{end}}
+  </div>
 </form>
 {{template "editor" .Editor}}
 {{template "backlinks" .Backlinks}}

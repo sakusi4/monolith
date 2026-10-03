@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,6 +118,19 @@ func TestPages(t *testing.T) {
 		}
 	})
 
+	t.Run("a save sent again after it went through answers the same", func(t *testing.T) {
+		tech := pageID(t, "기술 정리")
+		at := version(t, tech)
+		first := saveAt(t, tech, "기술 정리", "다시 보낸 저장", at)
+		again := saveAt(t, tech, "기술 정리", "다시 보낸 저장", at)
+		if first.Code != http.StatusNoContent || again.Code != http.StatusNoContent || again.Header().Get("Page-Version") != first.Header().Get("Page-Version") {
+			t.Errorf("saves = %d %q then %d %q, want 204 twice with the same version", first.Code, first.Header().Get("Page-Version"), again.Code, again.Header().Get("Page-Version"))
+		}
+		if cache := s.get(t, "/page/pages/"+tech, session).Header().Get("Cache-Control"); cache != "no-store" {
+			t.Errorf("Cache-Control of a page screen = %q, want no-store, so Back does not show an old version", cache)
+		}
+	})
+
 	t.Run("a subpage made from the editor sits under its parent", func(t *testing.T) {
 		tech := pageID(t, "기술 정리")
 		sdn := create(t, "SDN", tech)
@@ -180,6 +194,24 @@ func TestPages(t *testing.T) {
 		}
 		if rec := s.post(t, "/page/pages/"+tech+"/move", url.Values{"parent": {notes}}, session); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("moving a page under its own subpage = %d, want 422", rec.Code)
+		}
+	})
+
+	t.Run("two moves at once cannot put two pages under each other", func(t *testing.T) {
+		for i := range 20 {
+			a := create(t, "Loop A "+strconv.Itoa(i), "")
+			b := create(t, "Loop B "+strconv.Itoa(i), "")
+			codes := make([]int, 2)
+			var wg sync.WaitGroup
+			for j, move := range [][2]string{{a, b}, {b, a}} {
+				wg.Go(func() {
+					codes[j] = s.post(t, "/page/pages/"+move[0]+"/move", url.Values{"parent": {move[1]}}, session).Code
+				})
+			}
+			wg.Wait()
+			if codes[0] == http.StatusSeeOther && codes[1] == http.StatusSeeOther {
+				t.Fatalf("pages %s and %s both moved under each other", a, b)
+			}
 		}
 	})
 

@@ -27,12 +27,24 @@ async function start(root) {
     dirtySince: 0,
     saving: null,
     sending: null,
+    unsure: null,
+    failed: false,
+    uploads: 0,
     again: false,
     stopped: false,
     timer: 0,
   };
 
   const uploader = async (files, schema) => {
+    state.uploads++;
+    try {
+      return await uploadAll(files, schema);
+    } finally {
+      state.uploads--;
+    }
+  };
+
+  const uploadAll = async (files, schema) => {
     const nodes = [];
     for (const file of files) {
       const name = uploadName(file);
@@ -91,33 +103,40 @@ async function start(root) {
   // fitsKeepalive reports whether a save of c fits in the request size a browser sends while leaving.
   const fitsKeepalive = (c) => new Blob([c.title, c.body]).size < keepaliveLimit;
 
+  // save sends the page, or first sends again a save whose outcome is unknown, so that the server
+  // can tell a repeated save from a stale one.
   async function save() {
     clearTimeout(state.timer);
-    if (state.stopped || !isDirty()) {
+    if (state.stopped || (!state.unsure && !isDirty())) {
       return;
     }
     if (state.saving) {
       state.again = true;
       return state.saving;
     }
-    state.sending = current();
-    const c = { ...state.sending };
-    let note = '';
-    if (!c.title) {
-      c.title = state.saved.title;
-      note = 'Enter a title.';
-    } else if (c.title === state.rejected.title) {
-      c.title = state.saved.title;
-      note = state.rejected.problem;
-    }
+    const { c, note } = state.unsure || prepare();
+    state.sending = c;
     say('Saving…');
     state.saving = send(c, note);
     await state.saving;
     state.saving = null;
-    if (state.again) {
+    if (state.again || !state.failed) {
       state.again = false;
       schedule();
     }
+  }
+
+  // prepare is the current title and body as they are saved: a blank or rejected title is sent as the
+  // last saved one, with a note on why.
+  function prepare() {
+    const c = current();
+    if (!c.title) {
+      return { c: { ...c, title: state.saved.title }, note: 'Enter a title.' };
+    }
+    if (c.title === state.rejected.title) {
+      return { c: { ...c, title: state.saved.title }, note: state.rejected.problem };
+    }
+    return { c, note: '' };
   }
 
   async function send(c, note) {
@@ -127,6 +146,7 @@ async function start(root) {
     form.append('version', state.version);
     try {
       const res = await fetch(root.dataset.contentUrl, { method: 'POST', body: form, keepalive: fitsKeepalive(c) });
+      state.failed = res.status !== 204;
       if (isSignedOut(res)) {
         say('Signed out. Sign in in another tab to keep saving.');
         state.timer = setTimeout(save, retryDelay);
@@ -135,6 +155,7 @@ async function start(root) {
       if (res.status === 204) {
         state.version = res.headers.get('Page-Version');
         state.saved = c;
+        state.unsure = null;
         state.dirtySince = 0;
         say(note ? `Saved. ${note}` : 'Saved');
         return;
@@ -159,6 +180,8 @@ async function start(root) {
       }
       throw new Error(`status ${res.status}`);
     } catch {
+      state.failed = true;
+      state.unsure = { c, note };
       say("Couldn't save. Retrying…");
       state.timer = setTimeout(save, retryDelay);
     }
@@ -178,12 +201,14 @@ async function start(root) {
   });
   window.addEventListener('pagehide', () => save());
   window.addEventListener('beforeunload', (event) => {
-    if (!isDirty()) {
+    const uploading = state.uploads > 0;
+    if (!uploading && !isDirty()) {
       return;
     }
     const queued = state.saving && !same(current(), state.sending);
+    const failed = state.failed;
     save();
-    if (queued || !fitsKeepalive(current())) {
+    if (uploading || queued || failed || !fitsKeepalive(current())) {
       event.preventDefault();
     }
   });

@@ -98,6 +98,29 @@ func (s *Store) renameFolder(ctx context.Context, p Page, title string) error {
 	return s.drive.UpdateFolder(ctx, p.FolderID, path[len(path)-1].ParentID, folderName(title, p.ID))
 }
 
+// moveFolderToPages moves the drive folder of p into Pages, named as the folders of pages of their own
+// are, unless it is there already, gone, or in the trash.
+func (s *Store) moveFolderToPages(ctx context.Context, p Page) error {
+	if p.FolderID == 0 {
+		return nil
+	}
+	path, err := s.drive.Path(ctx, p.FolderID)
+	if errors.Is(err, drive.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	pages, err := s.drive.EnsureFolder(ctx, 0, pagesFolder)
+	if err != nil {
+		return err
+	}
+	if path[len(path)-1].ParentID == pages {
+		return nil
+	}
+	return s.drive.UpdateFolder(ctx, p.FolderID, pages, folderName(p.Title, p.ID))
+}
+
 // isLiveFolder reports whether id is a drive folder outside the trash; 0 is none.
 func (s *Store) isLiveFolder(ctx context.Context, id int64) (bool, error) {
 	if id == 0 {
