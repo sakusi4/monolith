@@ -126,7 +126,7 @@
   {{end}}
   <form id="add-item" method="post" action="{{.Add.URL}}" hx-boost="true">
     <fieldset>
-      <legend>Add to {{.Month.Format "Jan 2006"}}</legend>
+      <legend>Add an expense</legend>
       <label>Date
         <input type="date" name="date" value="{{.Add.Date}}" min="{{.DateMin}}" max="{{.DateMax}}" required>
       </label>

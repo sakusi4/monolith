@@ -105,8 +105,8 @@ func newExpenseListPage(q expenseQuery, months []time.Time, suggestions []expens
 		Add:         view.Add,
 		Suggestions: unusedExpenseSuggestions(suggestions, expenses),
 		Categories:  expenseCategories,
-		DateMin:     month.Format(time.DateOnly),
-		DateMax:     month.AddDate(0, 1, -1).Format(time.DateOnly),
+		DateMin:     firstMonth.Format(time.DateOnly),
+		DateMax:     months[0].AddDate(0, 1, -1).Format(time.DateOnly),
 		Currencies:  money.Currencies,
 		Error:       view.Error,
 	}
@@ -161,7 +161,7 @@ func unusedExpenseSuggestions(suggestions []expenseSuggestion, expenses []Expens
 }
 
 func (h *handler) createExpense(w http.ResponseWriter, r *http.Request) {
-	q, month, ok := h.expenseRequest(w, r)
+	q, _, ok := h.expenseRequest(w, r)
 	if !ok {
 		return
 	}
@@ -173,7 +173,7 @@ func (h *handler) createExpense(w http.ResponseWriter, r *http.Request) {
 		Amount:    r.PostFormValue("amount"),
 		Submitted: true,
 	}
-	in, problem := expenseInput(form, month)
+	in, problem := expenseInput(form, currentMonth(time.Now(), h.loc))
 	if problem != "" {
 		form.Error = problem
 		h.renderExpenses(w, r, http.StatusUnprocessableEntity, q, listView{Add: form})
@@ -187,7 +187,7 @@ func (h *handler) createExpense(w http.ResponseWriter, r *http.Request) {
 		web.ServerError(w, r, err)
 		return
 	default:
-		http.Redirect(w, r, q.listURL(month), http.StatusSeeOther)
+		http.Redirect(w, r, q.listURL(monthOf(in.Date)), http.StatusSeeOther)
 		return
 	}
 	h.renderExpenses(w, r, http.StatusUnprocessableEntity, q, listView{Add: form})
@@ -225,7 +225,7 @@ func (h *handler) updateExpense(w http.ResponseWriter, r *http.Request) {
 		Submitted: true,
 	}
 	view := listView{EditID: id}
-	in, problem := expenseInput(form, month)
+	in, problem := expenseInput(form, currentMonth(time.Now(), h.loc))
 	if problem != "" {
 		form.Error = problem
 		view.Edit = form
@@ -243,7 +243,7 @@ func (h *handler) updateExpense(w http.ResponseWriter, r *http.Request) {
 		web.ServerError(w, r, err)
 		return
 	default:
-		http.Redirect(w, r, q.listURL(month), http.StatusSeeOther)
+		http.Redirect(w, r, q.listURL(monthOf(in.Date)), http.StatusSeeOther)
 		return
 	}
 	view.Edit = form
@@ -271,16 +271,16 @@ func (h *handler) deleteExpense(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// expenseInput parses form for an expense in month. It returns the problem to show instead when
-// the amount or the date is invalid.
-func expenseInput(form itemForm, month time.Time) (ExpenseInput, string) {
+// expenseInput parses form for an expense dated from firstMonth through the end of month last. It
+// returns the problem to show instead when the amount or the date is invalid.
+func expenseInput(form itemForm, last time.Time) (ExpenseInput, string) {
 	amount, ok := money.Parse(form.Currency, form.Amount)
 	if !ok {
 		return ExpenseInput{}, amountExample
 	}
 	date, err := time.Parse(time.DateOnly, form.Date)
-	if err != nil || !inMonth(date, month) {
-		return ExpenseInput{}, fmt.Sprintf("Pick a date in %s.", month.Format(monthLabelLayout))
+	if err != nil || date.Before(firstMonth) || !date.Before(last.AddDate(0, 1, 0)) {
+		return ExpenseInput{}, fmt.Sprintf("Pick a date from %s to %s.", firstMonth.Format(monthLabelLayout), last.Format(monthLabelLayout))
 	}
 	return ExpenseInput{Date: date, Name: form.Name, Category: form.Category, Currency: form.Currency, Amount: amount}, ""
 }

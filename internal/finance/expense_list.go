@@ -238,6 +238,6 @@ func defaultExpenseDate(now time.Time, loc *time.Location, month time.Time) time
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-func inMonth(date, month time.Time) bool {
-	return !date.Before(month) && date.Before(month.AddDate(0, 1, 0))
+func monthOf(date time.Time) time.Time {
+	return time.Date(date.Year(), date.Month(), 1, 0, 0, 0, 0, time.UTC)
 }

@@ -90,7 +90,8 @@ func TestExpenses(t *testing.T) {
 		for _, form := range []url.Values{
 			{"date": {"2025-01-05"}, "name": {"  "}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
 			{"date": {"2025-01-05"}, "name": {"Gym"}, "category": {"other"}, "currency": {"KRW"}, "amount": {"1.5"}},
-			{"date": {"2025-02-01"}, "name": {"Gym"}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
+			{"date": {"2024-01-31"}, "name": {"Gym"}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
+			{"date": {"2099-01-01"}, "name": {"Gym"}, "category": {"other"}, "currency": {"USD"}, "amount": {"1"}},
 		} {
 			wantStatus(t, "/finance/expenses/2025-01/items/new", form, http.StatusUnprocessableEntity)
 		}
@@ -104,7 +105,6 @@ func TestExpenses(t *testing.T) {
 		wantContains(t, edit, `value="40.00"`, `value="Groceries"`, `<option value="food" selected>`, `value="2025-04-09"`)
 		wantRedirect(t, s.post(t, edit, url.Values{"date": {"2025-04-30"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"12.00"}}, session), "/finance/expenses?direction=desc&month=2025-04&order=date")
 		wantContains(t, "/finance/expenses?month=2025-04", "Dining", "<td>Travel</td>", "<td>Apr 30</td>", "USD 12.00")
-		wantStatus(t, edit, url.Values{"date": {"2025-05-01"}, "name": {"Dining"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"12.00"}}, http.StatusUnprocessableEntity)
 		wantContains(t, "/finance/expenses?month=2025-02", "AED 40.00")
 		wantStatus(t, edit, url.Values{"date": {"2025-04-30"}, "name": {" "}, "category": {"travel"}, "currency": {"USD"}, "amount": {"1"}}, http.StatusUnprocessableEntity)
 		other := "/finance/expenses/2025-02/items/" + id + "/edit"
@@ -123,6 +123,16 @@ func TestExpenses(t *testing.T) {
 			t.Errorf("GET 2025-04 after delete still shows Dining or lost the other row:\n%s", got)
 		}
 		wantStatus(t, del, nil, http.StatusNotFound)
+	})
+
+	t.Run("an expense goes to the month of its date when added or edited", func(t *testing.T) {
+		form := url.Values{"date": {"2025-03-28"}, "name": {"Taxi"}, "category": {"travel"}, "currency": {"USD"}, "amount": {"8.00"}}
+		wantRedirect(t, s.post(t, "/finance/expenses/2025-04/items/new", form, session), "/finance/expenses?direction=desc&month=2025-03&order=date")
+		wantContains(t, "/finance/expenses?month=2025-03", "<td>Mar 28</td>", "<td>Taxi</td>")
+		edit := "/finance/expenses/2025-03/items/" + expenseID(t, "2025-03", "Taxi", "USD") + "/edit"
+		form.Set("date", "2025-02-28")
+		wantRedirect(t, s.post(t, edit, form, session), "/finance/expenses?direction=desc&month=2025-02&order=date")
+		wantContains(t, "/finance/expenses?month=2025-02", "<td>Feb 28</td>", "<td>Taxi</td>")
 	})
 
 	t.Run("a month shows 20 rows a page, and filters narrow the rows and the total", func(t *testing.T) {
