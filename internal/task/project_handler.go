@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/sakusi4/monolith/internal/drive"
+	"github.com/sakusi4/monolith/internal/page"
 	"github.com/sakusi4/monolith/web"
 )
 
@@ -30,7 +32,8 @@ type projectPage struct {
 	Statuses    []ProjectStatus
 	Tasks       taskTable
 	AllTasksURL string
-	Attachments attachmentSection
+	Attachments drive.Attachments
+	Links       page.Links
 	Error       string
 	URL         string
 	EditURL     string
@@ -77,15 +80,15 @@ func (h *handler) renderProjects(w http.ResponseWriter, r *http.Request, status 
 		current = ""
 	}
 	options := append(web.Options(projectStatuses, ProjectStatus.Label, current), web.Option{Value: allValue, Label: "All", Selected: filter == allValue})
-	page := projectListPage{
+	view := projectListPage{
 		Filters: web.FilterBar{Action: projectsURL, Filters: []web.Filter{{Name: "status", Label: "Status", Options: options}}},
 		NewName: newName,
 		Error:   problem,
 	}
 	for _, p := range projects {
-		page.Rows = append(page.Rows, projectRow{Project: p, Period: period(p), URL: projectURL(p.ID)})
+		view.Rows = append(view.Rows, projectRow{Project: p, Period: period(p), URL: projectURL(p.ID)})
 	}
-	web.Render(w, r, status, "project_list", page)
+	web.Render(w, r, status, "project_list", view)
 }
 
 func (h *handler) createProject(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +140,12 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 		web.ServerError(w, r, err)
 		return
 	}
-	sec, err := h.attachments(ctx, p.FolderID)
+	sec, err := h.store.drive.Attachments(ctx, p.FolderID)
+	if err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	links, err := h.store.pages.Links(ctx, p.PageID)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
@@ -145,7 +153,7 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 	u := projectURL(id)
 	table := h.newTaskTable(defaultTaskQuery.sort(tasks), projects, u, view.Add)
 	table.ProjectID = id
-	page := projectPage{
+	screen := projectPage{
 		Project:     p,
 		Period:      period(p),
 		Editing:     view.Editing,
@@ -154,6 +162,7 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 		Tasks:       table,
 		AllTasksURL: tasksURL + "?" + taskQuery{Status: statusAll, ProjectID: id, Order: orderDue, Direction: web.Asc}.values().Encode(),
 		Attachments: sec,
+		Links:       links,
 		Error:       view.Error,
 		URL:         u,
 		EditURL:     u + "/edit",
@@ -161,9 +170,9 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 		FilesURL:    u + "/files",
 	}
 	if view.Editing && !view.Edit.Submitted {
-		page.Edit = projectForm{Name: p.Name, Status: p.Status, Started: dateInput(p.StartedOn), Finished: dateInput(p.FinishedOn), Body: p.Body}
+		screen.Edit = projectForm{Name: p.Name, Status: p.Status, Started: dateInput(p.StartedOn), Finished: dateInput(p.FinishedOn), Body: p.Body}
 	}
-	web.Render(w, r, status, "project_detail", page)
+	web.Render(w, r, status, "project_detail", screen)
 }
 
 func (h *handler) updateProject(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sakusi4/monolith/internal/drive"
+	"github.com/sakusi4/monolith/internal/page"
 )
 
 const projectsFolder = "Projects"
@@ -42,10 +43,11 @@ func (s ProjectStatus) Label() string {
 	return string(s)
 }
 
-// Project is a project with the number of its tasks that are still open. The dates are zero when
-// unset, and FolderID is 0 once its drive folder is deleted.
+// Project is a project with the name, body, and folder of its page and the number of its tasks that
+// are still open. The dates are zero when unset, and FolderID is 0 once its drive folder is deleted.
 type Project struct {
 	ID         int64
+	PageID     int64
 	Name       string
 	Status     ProjectStatus
 	StartedOn  time.Time
@@ -109,12 +111,14 @@ func (s *Store) projects(ctx context.Context, statuses []ProjectStatus, id int64
 		open[i] = string(st)
 	}
 	query := `
-		SELECT p.id, p.name, p.status, p.started_on, p.finished_on, p.body, p.folder_id,
+		SELECT p.id, pg.id, pg.title, p.status, p.started_on, p.finished_on, pg.body, pg.folder_id,
 			count(t.id) FILTER (WHERE t.status = ANY($3))
-		FROM projects p LEFT JOIN tasks t ON t.project_id = p.id
+		FROM projects p
+		JOIN pages pg ON pg.project_id = p.id
+		LEFT JOIN tasks t ON t.project_id = p.id
 		WHERE p.status = ANY($1) AND ($2 = 0 OR p.id = $2)
-		GROUP BY p.id
-		ORDER BY lower(p.name), p.id`
+		GROUP BY p.id, pg.id
+		ORDER BY lower(pg.title), p.id`
 	rows, err := s.db.QueryContext(ctx, query, names, id, open)
 	if err != nil {
 		return nil, fmt.Errorf("query projects: %w", err)
@@ -127,7 +131,7 @@ func (s *Store) projects(ctx context.Context, statuses []ProjectStatus, id int64
 			started, finished sql.Null[time.Time]
 			folder            sql.Null[int64]
 		)
-		if err := rows.Scan(&p.ID, &p.Name, &p.Status, &started, &finished, &p.Body, &folder, &p.OpenTasks); err != nil {
+		if err := rows.Scan(&p.ID, &p.PageID, &p.Name, &p.Status, &started, &finished, &p.Body, &folder, &p.OpenTasks); err != nil {
 			return nil, fmt.Errorf("scan project: %w", err)
 		}
 		p.StartedOn, p.FinishedOn, p.FolderID = started.V, finished.V, folder.V
@@ -139,8 +143,9 @@ func (s *Store) projects(ctx context.Context, statuses []ProjectStatus, id int64
 	return projects, nil
 }
 
-// CreateProject adds a project with a new drive folder, Projects/<name>, and returns its id. It
-// returns ErrInvalidProject, ErrNameTaken, or ErrFolderTaken when the input is not allowed.
+// CreateProject adds a project with an empty body and a new drive folder, Projects/<name>, and
+// returns its id. It returns ErrInvalidProject, ErrNameTaken, or ErrFolderTaken when the input is
+// not allowed.
 func (s *Store) CreateProject(ctx context.Context, in ProjectInput) (int64, error) {
 	in, err := in.Clean()
 	if err != nil {
@@ -164,25 +169,43 @@ func (s *Store) CreateProject(ctx context.Context, in ProjectInput) (int64, erro
 	if err != nil {
 		return 0, err
 	}
-	var id int64
-	query := `
-		INSERT INTO projects (name, status, started_on, finished_on, body, folder_id)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`
-	err = s.db.QueryRowContext(ctx, query, in.Name, in.Status, nullDate(in.StartedOn), nullDate(in.FinishedOn), in.Body, folder).Scan(&id)
-	if isPgError(err, uniqueViolation) {
+	id, err := s.insertProject(ctx, in, folder)
+	if errors.Is(err, page.ErrTitleTaken) {
 		return 0, errors.Join(ErrNameTaken, s.drive.TrashFolder(ctx, folder))
 	}
 	if err != nil {
-		return 0, errors.Join(fmt.Errorf("insert project: %w", err), s.drive.TrashFolder(ctx, folder))
+		return 0, errors.Join(err, s.drive.TrashFolder(ctx, folder))
+	}
+	return id, nil
+}
+
+// insertProject adds the row and the page of project in, with its attachments in folder, in one
+// transaction.
+func (s *Store) insertProject(ctx context.Context, in ProjectInput, folder int64) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+	var id int64
+	query := `INSERT INTO projects (status, started_on, finished_on) VALUES ($1, $2, $3) RETURNING id`
+	if err := tx.QueryRowContext(ctx, query, in.Status, nullDate(in.StartedOn), nullDate(in.FinishedOn)).Scan(&id); err != nil {
+		return 0, fmt.Errorf("insert project: %w", err)
+	}
+	if _, err := s.pages.CreateOwned(ctx, tx, page.Owner{ProjectID: id}, in.Name, folder); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
 	}
 	return id, nil
 }
 
 // UpdateProject saves in as project id and renames its drive folder with it, unless the folder is
-// gone or in the trash. It attaches the uploads that the body links to and moves the files it no
-// longer links to the trash as UpdateTask does. It
-// returns the errors of CreateProject, the errors of AttachToProject when an upload cannot be
-// attached, and ErrNotFound when there is no such project.
+// gone or in the trash. It saves the name and body to the project's page, which attaches the uploads
+// that the body links to and moves the files it no longer links to the trash as page.Store.Save
+// does. It returns the errors of CreateProject, the errors of AttachToProject when an upload cannot
+// be attached, and ErrNotFound when there is no such project.
 func (s *Store) UpdateProject(ctx context.Context, id int64, in ProjectInput, uploads []drive.Upload) error {
 	in, err := in.Clean()
 	if err != nil {
@@ -199,31 +222,26 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, in ProjectInput, up
 	if taken {
 		return errors.Join(ErrNameTaken, s.drive.Discard(uploads))
 	}
-	in.Body, err = s.attachLinked(in.Body, uploads, func(used []drive.Upload) ([]drive.File, error) {
-		return s.AttachToProject(ctx, id, used)
-	})
-	if err != nil {
-		return err
-	}
 	if in.Name != cur.Name && cur.FolderID != 0 {
 		if err := s.renameFolder(ctx, cur.FolderID, in.Name); err != nil {
-			return err
+			return errors.Join(err, s.drive.Discard(uploads))
 		}
 	}
-	query := `
-		UPDATE projects SET name = $2, status = $3, started_on = $4, finished_on = $5, body = $6, updated_at = now()
-		WHERE id = $1`
-	res, err := s.db.ExecContext(ctx, query, id, in.Name, in.Status, nullDate(in.StartedOn), nullDate(in.FinishedOn), in.Body)
-	if isPgError(err, uniqueViolation) {
+	err = s.pages.Save(ctx, cur.PageID, page.Input{Title: in.Name, Body: in.Body}, uploads, func(used []drive.Upload) ([]drive.File, error) {
+		return s.AttachToProject(ctx, id, used)
+	})
+	if errors.Is(err, page.ErrTitleTaken) {
 		return ErrNameTaken
 	}
 	if err != nil {
-		return fmt.Errorf("update project: %w", err)
-	}
-	if err := requireRow(res); err != nil {
 		return err
 	}
-	return s.trashDropped(ctx, cur.FolderID, cur.Body, in.Body)
+	query := `UPDATE projects SET status = $2, started_on = $3, finished_on = $4, updated_at = now() WHERE id = $1`
+	res, err := s.db.ExecContext(ctx, query, id, in.Status, nullDate(in.StartedOn), nullDate(in.FinishedOn))
+	if err != nil {
+		return fmt.Errorf("update project: %w", err)
+	}
+	return requireRow(res)
 }
 
 // renameFolder renames the drive folder id to name, unless it is gone or in the trash.
@@ -244,17 +262,22 @@ func (s *Store) renameFolder(ctx context.Context, id int64, name string) error {
 
 func (s *Store) nameTaken(ctx context.Context, name string, except int64) (bool, error) {
 	var taken bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM projects WHERE name = $1 AND id <> $2)`, name, except).Scan(&taken)
-	if err != nil {
+	query := `SELECT EXISTS (SELECT 1 FROM pages WHERE project_id IS NOT NULL AND project_id <> $2 AND title = $1)`
+	if err := s.db.QueryRowContext(ctx, query, name, except).Scan(&taken); err != nil {
 		return false, fmt.Errorf("check project name: %w", err)
 	}
 	return taken, nil
 }
 
-// DeleteProject removes project id with its tasks and moves its folder to the trash. It returns
-// ErrNotFound when there is no such project.
+// DeleteProject removes project id with its tasks and moves their pages to the page trash, leaving
+// their drive folders. The project's folder takes the name of the folder of a page of its own, which
+// frees its name for a new project. It returns ErrNotFound when there is no such project.
 func (s *Store) DeleteProject(ctx context.Context, id int64) error {
 	p, err := s.Project(ctx, id)
+	if err != nil {
+		return err
+	}
+	pages, err := s.projectPages(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -265,5 +288,33 @@ func (s *Store) DeleteProject(ctx context.Context, id int64) error {
 	if err := requireRow(res); err != nil {
 		return err
 	}
-	return s.trashFolder(ctx, p.FolderID)
+	if err := s.pages.RenameFolder(ctx, p.PageID); err != nil {
+		return err
+	}
+	return s.pages.Trash(ctx, pages)
+}
+
+// projectPages returns the page of project id and the pages of its tasks.
+func (s *Store) projectPages(ctx context.Context, id int64) ([]int64, error) {
+	query := `
+		SELECT id FROM pages WHERE project_id = $1
+		UNION ALL
+		SELECT pg.id FROM pages pg JOIN tasks t ON t.id = pg.task_id WHERE t.project_id = $1`
+	rows, err := s.db.QueryContext(ctx, query, id)
+	if err != nil {
+		return nil, fmt.Errorf("query project pages: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var pageID int64
+		if err := rows.Scan(&pageID); err != nil {
+			return nil, fmt.Errorf("scan project page: %w", err)
+		}
+		ids = append(ids, pageID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query project pages: %w", err)
+	}
+	return ids, nil
 }

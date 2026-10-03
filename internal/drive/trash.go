@@ -54,6 +54,14 @@ func (s *Store) TrashFiles(ctx context.Context, folder int64, ids []int64) error
 	return nil
 }
 
+// TrashFolders moves the folders ids that are outside the trash to it and leaves the others alone.
+func (s *Store) TrashFolders(ctx context.Context, ids []int64) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE folders SET trashed_at = now() WHERE id = ANY($1) AND trashed_at IS NULL`, ids); err != nil {
+		return fmt.Errorf("trash folders: %w", err)
+	}
+	return nil
+}
+
 // Trash lists the folders and files moved to the trash, the latest first.
 func (s *Store) Trash(ctx context.Context) ([]TrashItem, error) {
 	query := `

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/sakusi4/monolith/internal/drive"
+	"github.com/sakusi4/monolith/internal/page"
 	"github.com/sakusi4/monolith/web"
 )
 
@@ -18,7 +20,8 @@ type taskPage struct {
 	ProjectURL  string
 	Due         string
 	Completed   string
-	Attachments attachmentSection
+	Attachments drive.Attachments
+	Links       page.Links
 	EditURL     string
 	DeleteURL   string
 }
@@ -28,7 +31,7 @@ type taskEditPage struct {
 	Form        taskForm
 	Projects    []Project
 	Statuses    []TaskStatus
-	Attachments attachmentSection
+	Attachments drive.Attachments
 	Error       string
 	URL         string
 	FilesURL    string
@@ -71,8 +74,8 @@ func (h *handler) renderTasks(w http.ResponseWriter, r *http.Request, status int
 	}
 	table := h.newTaskTable(q.sort(tasks), projects, q.listURL(), add)
 	table.ShowProject = true
-	page := taskListPage{Filters: web.FilterBar{Action: tasksURL, Filters: q.filters(projects)}, Table: table, Error: problem}
-	web.Render(w, r, status, "task_list", page)
+	view := taskListPage{Filters: web.FilterBar{Action: tasksURL, Filters: q.filters(projects)}, Table: table, Error: problem}
+	web.Render(w, r, status, "task_list", view)
 }
 
 func (h *handler) createTask(w http.ResponseWriter, r *http.Request) {
@@ -115,22 +118,27 @@ func (h *handler) showTask(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, err)
 		return
 	}
-	sec, err := h.attachments(r.Context(), t.FolderID)
+	sec, err := h.store.drive.Attachments(r.Context(), t.FolderID)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
 	}
-	page := taskPage{Task: t, Attachments: sec, EditURL: taskURL(id) + "/edit", DeleteURL: taskURL(id) + "/delete"}
+	links, err := h.store.pages.Links(r.Context(), t.PageID)
+	if err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	view := taskPage{Task: t, Attachments: sec, Links: links, EditURL: taskURL(id) + "/edit", DeleteURL: taskURL(id) + "/delete"}
 	if t.ProjectID != 0 {
-		page.ProjectURL = projectURL(t.ProjectID)
+		view.ProjectURL = projectURL(t.ProjectID)
 	}
 	if !t.Due.IsZero() {
-		page.Due = t.Due.Format(dateLayout)
+		view.Due = t.Due.Format(dateLayout)
 	}
 	if !t.CompletedAt.IsZero() {
-		page.Completed = t.CompletedAt.In(h.loc).Format(dateLayout)
+		view.Completed = t.CompletedAt.In(h.loc).Format(dateLayout)
 	}
-	web.Render(w, r, http.StatusOK, "task_detail", page)
+	web.Render(w, r, http.StatusOK, "task_detail", view)
 }
 
 func (h *handler) editTask(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +158,7 @@ func (h *handler) renderTaskEdit(w http.ResponseWriter, r *http.Request, status 
 		respondError(w, r, err)
 		return
 	}
-	sec, err := h.attachments(r.Context(), t.FolderID)
+	sec, err := h.store.drive.Attachments(r.Context(), t.FolderID)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
@@ -164,7 +172,7 @@ func (h *handler) renderTaskEdit(w http.ResponseWriter, r *http.Request, status 
 		form = taskForm{Title: t.Title, ProjectID: t.ProjectID, Status: t.Status, Due: dateInput(t.Due), Body: t.Body}
 	}
 	u := taskURL(id)
-	page := taskEditPage{
+	view := taskEditPage{
 		Task:        t,
 		Form:        form,
 		Projects:    projects,
@@ -175,7 +183,7 @@ func (h *handler) renderTaskEdit(w http.ResponseWriter, r *http.Request, status 
 		FilesURL:    u + "/files",
 		CancelURL:   u,
 	}
-	web.Render(w, r, status, "task_edit", page)
+	web.Render(w, r, status, "task_edit", view)
 }
 
 func (h *handler) updateTask(w http.ResponseWriter, r *http.Request) {

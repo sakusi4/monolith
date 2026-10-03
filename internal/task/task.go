@@ -1,6 +1,7 @@
-// Package task keeps projects and their tasks, each with a markdown body and attachments. A project
-// owns a folder in the drive, and so does a task once it has attachments; the package reads and
-// changes them only through the drive's Store.
+// Package task keeps projects and their tasks. The title, markdown body, and attachments of each
+// live in its page, which the package changes only through the page Store. A project owns a folder
+// in the drive, and so does a task once it has attachments; the package changes them only through
+// the drive's Store.
 package task
 
 import (
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/sakusi4/monolith/internal/drive"
+	"github.com/sakusi4/monolith/internal/page"
 )
 
 const (
@@ -34,10 +36,11 @@ var (
 type Store struct {
 	db    *sql.DB
 	drive *drive.Store
+	pages *page.Store
 }
 
-func NewStore(db *sql.DB, driveStore *drive.Store) *Store {
-	return &Store{db: db, drive: driveStore}
+func NewStore(db *sql.DB, driveStore *drive.Store, pageStore *page.Store) *Store {
+	return &Store{db: db, drive: driveStore, pages: pageStore}
 }
 
 type TaskStatus string
@@ -72,10 +75,12 @@ func (s TaskStatus) IsOpen() bool {
 	return slices.Contains(openStatuses, s)
 }
 
-// Task is a task with the name of its project, which is empty for a task in the inbox. Due and
-// CompletedAt are zero when unset, and FolderID is 0 until the task has attachments.
+// Task is a task with the name of its project, which is empty for a task in the inbox, and the title,
+// body, and folder of its page. Due and CompletedAt are zero when unset, and FolderID is 0 until the
+// task has attachments.
 type Task struct {
 	ID          int64
+	PageID      int64
 	Title       string
 	ProjectID   int64
 	ProjectName string
@@ -164,8 +169,10 @@ func (s *Store) tasks(ctx context.Context, f TaskFilter, id int64) ([]Task, erro
 		statuses[i] = string(st)
 	}
 	query := `
-		SELECT t.id, t.title, t.project_id, coalesce(p.name, ''), t.status, t.due_on, t.body, t.folder_id, t.completed_at, t.created_at
-		FROM tasks t LEFT JOIN projects p ON p.id = t.project_id
+		SELECT t.id, pg.id, pg.title, t.project_id, coalesce(pp.title, ''), t.status, t.due_on, pg.body, pg.folder_id, t.completed_at, t.created_at
+		FROM tasks t
+		JOIN pages pg ON pg.task_id = t.id
+		LEFT JOIN pages pp ON pp.project_id = t.project_id
 		WHERE t.status = ANY($1) AND ($2 = 0 OR t.project_id = $2) AND (NOT $3 OR t.project_id IS NULL) AND ($4 = 0 OR t.id = $4)
 		ORDER BY t.created_at, t.id`
 	rows, err := s.db.QueryContext(ctx, query, statuses, f.ProjectID, f.Inbox, id)
@@ -180,7 +187,7 @@ func (s *Store) tasks(ctx context.Context, f TaskFilter, id int64) ([]Task, erro
 			project, folder sql.Null[int64]
 			due, completed  sql.Null[time.Time]
 		)
-		if err := rows.Scan(&t.ID, &t.Title, &project, &t.ProjectName, &t.Status, &due, &t.Body, &folder, &completed, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.PageID, &t.Title, &project, &t.ProjectName, &t.Status, &due, &t.Body, &folder, &completed, &t.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}
 		t.ProjectID, t.Due, t.FolderID, t.CompletedAt = project.V, due.V, folder.V, completed.V
@@ -192,33 +199,46 @@ func (s *Store) tasks(ctx context.Context, f TaskFilter, id int64) ([]Task, erro
 	return tasks, nil
 }
 
-// AddTask adds in. It returns ErrInvalidTask when in breaks a rule or names a project that does not exist.
+// AddTask adds in with an empty body. It returns ErrInvalidTask when in breaks a rule or names a
+// project that does not exist.
 func (s *Store) AddTask(ctx context.Context, in TaskInput) error {
 	in, err := in.Clean()
 	if err != nil {
 		return err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+	var id int64
 	query := `
-		INSERT INTO tasks (title, project_id, status, due_on, body, completed_at)
-		VALUES ($1, $2, $3, $4, $5, CASE WHEN $3 = 'done' THEN now() END)`
-	_, err = s.db.ExecContext(ctx, query, in.Title, nullID(in.ProjectID), in.Status, nullDate(in.Due), in.Body)
+		INSERT INTO tasks (project_id, status, due_on, completed_at)
+		VALUES ($1, $2, $3, CASE WHEN $2 = 'done' THEN now() END) RETURNING id`
+	err = tx.QueryRowContext(ctx, query, nullID(in.ProjectID), in.Status, nullDate(in.Due)).Scan(&id)
 	if isPgError(err, foreignKeyViolation) {
 		return fmt.Errorf("%w: no project %d", ErrInvalidTask, in.ProjectID)
 	}
 	if err != nil {
 		return fmt.Errorf("insert task: %w", err)
 	}
+	if _, err := s.pages.CreateOwned(ctx, tx, page.Owner{TaskID: id}, in.Title, 0); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
 	return nil
 }
 
 // UpdateTask saves in as task id and moves the task's folder to its project and renames it after
-// the title, unless the folder is gone or in the trash. It attaches the uploads that the body links to
-// by name, pointing those links at them, and discards the rest; it uses up uploads either way. A task
-// saved as done keeps the time it was first completed, and one saved as any other status loses it.
-// Files in the task's folder that the old body linked to and the new one does not go to the trash.
-// It returns ErrInvalidTask when in breaks a rule or names a project that does not exist, ErrNoFolder
-// when the task has a folder and the new project has none, the errors of AttachToTask when an upload
-// cannot be attached, and ErrNotFound when there is no such task.
+// the title, unless the folder is gone or in the trash. When the title or body changed or uploads
+// came, it saves them to the task's page, which attaches the uploads that the body links to and moves
+// the files it no longer links to the trash as page.Store.Save does. A task saved as done keeps the time it was first completed, and
+// one saved as any other status loses it. It returns ErrInvalidTask when in breaks a rule or names a
+// project that does not exist, ErrNoFolder when the task has a folder and the new project has none,
+// the errors of AttachToTask when an upload cannot be attached, and ErrNotFound when there is no
+// such task.
 func (s *Store) UpdateTask(ctx context.Context, id int64, in TaskInput, uploads []drive.Upload) error {
 	in, err := in.Clean()
 	if err != nil {
@@ -233,24 +253,23 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, in TaskInput, uploads 
 			return errors.Join(err, s.drive.Discard(uploads))
 		}
 	}
-	in.Body, err = s.attachLinked(in.Body, uploads, func(used []drive.Upload) ([]drive.File, error) {
-		return s.AttachToTask(ctx, id, used)
-	})
-	if err != nil {
-		return err
+	if in.Title != cur.Title || in.Body != cur.Body || len(uploads) > 0 {
+		err := s.pages.Save(ctx, cur.PageID, page.Input{Title: in.Title, Body: in.Body}, uploads, func(used []drive.Upload) ([]drive.File, error) {
+			return s.AttachToTask(ctx, id, used)
+		})
+		if err != nil {
+			return err
+		}
 	}
 	query := `
-		UPDATE tasks SET title = $2, status = $3, due_on = $4, body = $5,
-			completed_at = CASE WHEN $3 = 'done' THEN coalesce(completed_at, now()) END, updated_at = now()
+		UPDATE tasks SET status = $2, due_on = $3,
+			completed_at = CASE WHEN $2 = 'done' THEN coalesce(completed_at, now()) END, updated_at = now()
 		WHERE id = $1`
-	res, err := s.db.ExecContext(ctx, query, id, in.Title, in.Status, nullDate(in.Due), in.Body)
+	res, err := s.db.ExecContext(ctx, query, id, in.Status, nullDate(in.Due))
 	if err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
 	if err := requireRow(res); err != nil {
-		return err
-	}
-	if err := s.trashDropped(ctx, cur.FolderID, cur.Body, in.Body); err != nil {
 		return err
 	}
 	if in.Title != cur.Title && cur.FolderID != 0 {
@@ -259,8 +278,8 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, in TaskInput, uploads 
 	return nil
 }
 
-// DeleteTask removes task id and moves its folder to the trash. It returns ErrNotFound when there
-// is no such task.
+// DeleteTask removes task id and moves its page to the page trash, leaving its drive folder. It
+// returns ErrNotFound when there is no such task.
 func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	t, err := s.Task(ctx, id)
 	if err != nil {
@@ -273,5 +292,5 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 	if err := requireRow(res); err != nil {
 		return err
 	}
-	return s.trashFolder(ctx, t.FolderID)
+	return s.pages.Trash(ctx, []int64{t.PageID})
 }

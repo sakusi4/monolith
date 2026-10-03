@@ -11,7 +11,7 @@
   {{if not .Editing}}
   <div class="actions">
     <a class="button" href="{{.EditURL}}" hx-boost="true">Edit</a>
-    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this project and its tasks? Its folder moves to the trash.')">
+    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this project and its tasks? Their pages move to the page trash.')">
       <button type="submit" class="danger">Delete</button>
     </form>
   </div>
@@ -44,7 +44,7 @@
     <textarea name="body" rows="12" data-attach>{{.Edit.Body}}</textarea>
   </label>
   <input type="file" name="files" multiple hidden>
-  <small>Markdown. Paste or drop images into the text to add them; they upload when you save.</small>
+  <small>Markdown. Write [[Title]] to add a subpage. Paste or drop images into the text to add them; they upload when you save.</small>
   <div class="actions">
     <button type="submit" class="primary">Save</button>
     <a href="{{.URL}}">Cancel</a>
@@ -61,6 +61,7 @@
 {{else}}
 {{with .Project.Body}}<article aria-label="Details">{{markdown .}}</article>{{end}}
 {{end}}
+{{template "page-links" .Links}}
 <section aria-labelledby="tasks">
   <h2 id="tasks">Open tasks</h2>
   {{template "task-add" .Tasks}}

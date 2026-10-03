@@ -6,10 +6,18 @@ import (
 )
 
 // FilterBar is a list page's filters, which the "filters" template renders as a GET form
-// to Action so that the URL holds the list state.
+// to Action so that the URL holds the list state. Search adds a text box when its Name is set.
 type FilterBar struct {
 	Action  string
+	Search  Search
 	Filters []Filter
+}
+
+// Search is the text box of a FilterBar.
+type Search struct {
+	Name  string
+	Label string
+	Value string
 }
 
 // Filter is one select in a FilterBar.

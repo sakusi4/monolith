@@ -5,7 +5,7 @@
   <h1>{{.Task.Title}}</h1>
   <div class="actions">
     <a class="button" href="{{.EditURL}}">Edit</a>
-    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this task? Its attachments move to the trash.')">
+    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this task? Its page moves to the page trash.')">
       <input type="hidden" name="next" value="/task/tasks">
       <button type="submit" class="danger">Delete</button>
     </form>
@@ -20,5 +20,6 @@
 <article aria-label="Details">
   {{with .Task.Body}}{{markdown .}}{{else}}<p>No details.</p>{{end}}
 </article>
+{{template "page-links" .Links}}
 {{template "attachments" .Attachments}}
 {{end}}

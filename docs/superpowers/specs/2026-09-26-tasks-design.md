@@ -6,6 +6,8 @@
 
 노션의 Projects와 Todo HQ를 대체한다. 프로젝트는 관련된 모든 자료를 모으는 곳이고, 할 일은 한 목록에 모두 모아 프로젝트와 연결해 한 화면에서 본다. 할 일과 프로젝트는 각자 상세 내용(마크다운 본문, 본문 속 이미지, 첨부 파일)을 가진다. 프로젝트는 다른 기능이 가리키는 허브다: 할 일과 드라이브 폴더가(나중에 메모도) 외래 키로 프로젝트를 가리키고, 프로젝트 화면이 그것들을 모아 보인다. 사이드바에 **Work** 섹션을 두고 **Tasks**(`/task/tasks`)와 **Projects**(`/task/projects`)를 둔다.
 
+프로젝트와 할 일의 이름·제목, 본문, 첨부 폴더는 그 페이지가 가진다(`2026-10-02-pages-design.md`). 이 문서의 본문·첨부·삭제 규칙 중 그 문서와 다른 것은 그 문서를 따른다.
+
 ## 결정 사항
 
 | 항목 | 결정 |
@@ -23,8 +25,8 @@
 | 첨부 | 할 일과 프로젝트의 파일은 드라이브의 자기 폴더에 둔다. 첨부 목록은 그 폴더의 최상위 파일이다. 본문의 이미지도 그 폴더의 파일이고, 본문에는 `![이름](/drive/files/{id}/content)`로 들어간다 |
 | 할 일 폴더 | 첫 파일을 올릴 때 만든다. 프로젝트의 할 일은 `<프로젝트 폴더>/Tasks/<폴더 이름>`, Inbox 할 일은 `Inbox/<폴더 이름>`. 폴더 이름은 제목에서 `/`를 `-`로 바꾸고 200자로 자른 것이고(비면 `Task <id>`), 그 이름이 이미 있으면 `<폴더 이름> (#<id>)`이다. 제목을 바꾸면 같은 규칙으로 폴더 이름도 바꾼다 |
 | 이미지 붙여넣기 | 본문 입력칸에 이미지를 붙여넣거나 끌어다 놓으면 `web/static/markdown_editor.js`가 파일을 편집 폼의 숨은 파일 입력칸에 담고, 커서 자리에 `![이름](이름)` 자리표시를 넣는다. 업로드는 Save 때 한 번이다: 편집 폼은 `multipart/form-data`이고, 서버는 본문이 `](이름)`으로 가리키는 파일만 첨부로 올려 그 링크를 `/drive/files/{id}/content`로 바꾸고 나머지는 버린다. 그래서 붙였다 지운 이미지나 Cancel한 편집은 아무것도 남기지 않는다. 저장할 때 원래 본문이 가리키던 파일 중 새 본문이 가리키지 않고 그 항목의 폴더에 있는 것은 휴지통으로 간다(`drive.TrashFiles`). Attach files로 올린 첨부는 본문이 가리키지 않았으므로 그대로다. 붙여넣은 것에 글자도 있으면(오피스 문서의 표처럼 글자와 그 그림이 같이 온 것) 글자를 붙여넣는다. 붙여넣은 파일 이름은 `pasted-<밀리초>-<n>`, 끌어다 놓은 파일은 원래 이름에서 공백과 괄호를 `-`로 바꾼 것이다. 검증에 실패한(422) 저장은 담아 둔 파일을 잃으므로 다시 붙여넣어야 한다 |
-| 할 일 삭제 | 할 일을 지우고 그 폴더를 휴지통으로 옮긴다 |
-| 프로젝트 삭제 | 프로젝트와 그 할 일을 지우고(`ON DELETE CASCADE`) 프로젝트 폴더(할 일 폴더를 포함한다)를 휴지통으로 옮긴다. 파일은 휴지통에서 되살릴 수 있다 |
+| 할 일 삭제 | 할 일을 지우고 그 페이지를 페이지 휴지통으로 옮긴다. 드라이브 폴더는 그대로 둔다 |
+| 프로젝트 삭제 | 프로젝트와 그 할 일을 지우고(`ON DELETE CASCADE`) 그 페이지들을 페이지 휴지통으로 옮긴다. 드라이브 폴더는 휴지통에 넣지 않고, 프로젝트 폴더는 `<이름> (#페이지 id)`로 이름을 바꿔 같은 이름의 프로젝트를 다시 만들 수 있게 한다 |
 
 ## 데이터 모델: `0011.sql`
 
@@ -55,6 +57,8 @@ CREATE TABLE tasks (
 );
 CREATE INDEX tasks_project_id_idx ON tasks (project_id);
 ```
+
+`0012`에서 `projects`의 `name`·`body`·`folder_id`와 `tasks`의 `title`·`body`·`folder_id`는 `pages`로 옮겼다.
 
 - `completed_at`은 상태를 저장하는 같은 SQL 문장이 정한다: `CASE WHEN $status = 'done' THEN coalesce(completed_at, now()) END`.
 - 할 일을 고치는 SQL은 `project_id`를 바꾸지 않는다.
@@ -168,7 +172,7 @@ htmx는 지출 화면과 같은 방식으로 목록 화면들과 프로젝트 �
 | `internal/postgres/migrations/0011.sql` | `projects`, `tasks` |
 | `internal/task/task.go` | 패키지 문서, `Store`(`*sql.DB`, `*drive.Store`), `Task`, `TaskStatus`와 표시 이름, `TaskInput`과 `Clean`, 할 일 Store 메서드 |
 | `internal/task/project.go` | `Project`, `ProjectStatus`와 표시 이름, `ProjectInput`과 `Clean`, 프로젝트 Store 메서드(드라이브 연동 포함) |
-| `internal/task/attachment.go` | 할 일 폴더 이름 규칙(`taskFolderName`), 폴더 찾기·만들기, 첨부 올리기와 목록, 본문이 가리키는 업로드 고르기와 링크 바꾸기(`usedUploads`, `linkFiles`) |
+| `internal/task/attachment.go` | 할 일 폴더 이름 규칙(`taskFolderName`), 폴더 찾기·만들기, 첨부 올리기. 본문이 가리키는 업로드 고르기와 링크 바꾸기(`usedUploads`, `linkFiles`)는 `internal/page/attachment.go`로 옮겼다 |
 | `internal/task/task_list.go` | `taskQuery`: 쿼리 해석, 필터 막대, 정렬, 목록 주소 |
 | `internal/task/handler.go` | `NewHandler`, 라우트, 공통 도우미(`next` 해석, 업로드 읽기 등) |
 | `internal/task/task_handler.go`, `project_handler.go` | 할 일, 프로젝트 핸들러 |
@@ -190,9 +194,7 @@ CLAUDE.md 9절을 따른다.
 - `ProjectInput.Clean`: 드라이브가 거절하는 이름, 목록 밖 상태, 종료일이 시작일보다 앞섬
 - `parseTaskQuery`, `statusFilter.statuses`, `taskQuery.sort`, `today`, `safeNext`
 - `taskFolderName`: 그대로 쓰는 제목, `/`가 든 제목, 200자를 넘는 제목, 공백뿐인 제목
-- `usedUploads`: 본문이 `](이름)`으로 가리키는 업로드와 나머지를 나눈다
-- `linkFiles`: 자리표시 링크를 파일 주소로 바꾼다
-- `droppedFiles`: 원래 본문에는 있고 새 본문에는 없는 파일 링크
+- `usedUploads`, `linkFiles`, `droppedFiles`: `internal/page`로 옮겼다(페이지 설계 참고)
 - `web`의 `markdown`: 체크박스와 표를 그린다, 제목을 한 단계 내린다, 원시 HTML은 빠진다, `javascript:` 링크는 버린다
 
 **HTTP 통합 테스트** (`cmd/server/task_test.go`의 `TestTasks`, 실제 DB)
@@ -204,7 +206,7 @@ CLAUDE.md 9절을 따른다.
 - 할 일의 본문이 할 일 화면에 마크다운으로 그려진다.
 - 할 일의 프로젝트를 바꾸면 폴더가 새 프로젝트의 `Tasks` 아래로 옮겨진다. 폴더가 없는 할 일은 폴더 없는 프로젝트로도 옮길 수 있고, 폴더가 있는 할 일을 폴더 없는 프로젝트로 옮기면 422이고 그대로다.
 - 할 일에 파일을 올리면 `Projects/<프로젝트>/Tasks/<제목>`에 저장되고 첨부 목록에 보인다. Inbox 할 일은 `Inbox/<제목>`이다. 본문과 함께 저장한 파일 중 본문이 가리키는 것만 첨부가 되고 그 이미지가 할 일 화면에 그려지며, 가리키지 않는 것은 남지 않는다. 다시 저장해 본문에서 뺀 파일은 휴지통으로 가되, 다른 할 일의 파일은 건드리지 않는다.
-- 할 일을 지우면 그 폴더가 휴지통으로 간다. 프로젝트를 지우면 그 할 일이 사라지고 프로젝트 폴더가 휴지통으로 간다.
+- 할 일을 지우면 그 페이지가 페이지 휴지통으로 가고 폴더는 남는다. 프로젝트를 지우면 그 할 일이 사라지고 프로젝트와 할 일의 페이지가 휴지통으로 간다.
 - 목록에서 프로젝트, 상태, 마감일을 바꾸면 저장되고 `next`로 간다. 폴더가 있는 할 일을 폴더 없는 프로젝트로 옮기면 422다.
 - 잘못된 필터는 400이다.
 

@@ -1,7 +1,6 @@
 package task
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -89,22 +88,6 @@ type addForm struct {
 	Error     string
 }
 
-// attachmentSection is the files of a drive folder as a task or project page lists them. Missing is
-// set when there is no folder, and Trashed when the folder is in the trash.
-type attachmentSection struct {
-	Missing bool
-	Trashed bool
-	URL     string
-	Files   []attachment
-}
-
-type attachment struct {
-	Name string
-	Kind string
-	Size string
-	URL  string
-}
-
 func (h *handler) newTaskTable(tasks []Task, projects []Project, next string, add addForm) taskTable {
 	table := taskTable{Add: add, Projects: projects, Statuses: taskStatuses, Next: next}
 	table.Add.URL = tasksURL + "/new"
@@ -139,28 +122,6 @@ func (h *handler) renderNext(w http.ResponseWriter, r *http.Request, status int,
 		q = defaultTaskQuery
 	}
 	h.renderTasks(w, r, status, q, add, problem)
-}
-
-func (h *handler) attachments(ctx context.Context, folder int64) (attachmentSection, error) {
-	if folder == 0 {
-		return attachmentSection{Missing: true}, nil
-	}
-	_, err := h.store.drive.Path(ctx, folder)
-	if errors.Is(err, drive.ErrNotFound) {
-		return attachmentSection{Trashed: true}, nil
-	}
-	if err != nil {
-		return attachmentSection{}, err
-	}
-	files, err := h.store.drive.Files(ctx, folder)
-	if err != nil {
-		return attachmentSection{}, err
-	}
-	sec := attachmentSection{URL: drive.FolderURL(folder)}
-	for _, f := range files {
-		sec.Files = append(sec.Files, attachment{Name: f.Name, Kind: f.Kind().Label(), Size: drive.FormatSize(f.Size), URL: drive.FileURL(f.ID)})
-	}
-	return sec, nil
 }
 
 // receive reads a multipart form with its files. It writes the error response and returns false when

@@ -1,0 +1,18 @@
+{{define "page-links"}}
+{{with .Children}}
+<section aria-labelledby="subpages">
+  <h2 id="subpages">Pages</h2>
+  <ul>
+    {{range .}}<li><a href="{{.URL}}">{{.Title}}</a></li>{{end}}
+  </ul>
+</section>
+{{end}}
+{{with .Backlinks}}
+<section aria-labelledby="linked-from">
+  <h2 id="linked-from">Linked from</h2>
+  <ul>
+    {{range .}}<li><a href="{{.URL}}">{{.Title}}</a> <small>{{.Path}}</small></li>{{end}}
+  </ul>
+</section>
+{{end}}
+{{end}}

@@ -31,7 +31,11 @@ func TestTasks(t *testing.T) {
 	}
 	taskID := func(t *testing.T, title string) string {
 		t.Helper()
-		return idOf(t, `SELECT id FROM tasks WHERE title = $1`, title)
+		return idOf(t, `SELECT task_id FROM pages WHERE title = $1 AND task_id IS NOT NULL`, title)
+	}
+	projectID := func(t *testing.T, name string) string {
+		t.Helper()
+		return idOf(t, `SELECT project_id FROM pages WHERE title = $1 AND project_id IS NOT NULL`, name)
 	}
 	addTask := func(t *testing.T, title, project, due string) {
 		t.Helper()
@@ -60,7 +64,7 @@ func TestTasks(t *testing.T) {
 	}
 	folderOf := func(t *testing.T, task string) (string, []string) {
 		t.Helper()
-		id := idOf(t, `SELECT folder_id FROM tasks WHERE id = $1`, task)
+		id := idOf(t, `SELECT folder_id FROM pages WHERE task_id = $1`, task)
 		rows, err := s.db.QueryContext(t.Context(), `
 			WITH RECURSIVE chain AS (
 				SELECT id, parent_id, name, 0 AS depth FROM folders WHERE id = $1
@@ -98,12 +102,14 @@ func TestTasks(t *testing.T) {
 		wantRedirect(t, s.get(t, "/task/tasks", nil), "/auth/login")
 	})
 
-	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO projects (name, status) VALUES ('tunnel', 'active')`); err != nil {
+	if _, err := s.db.ExecContext(t.Context(), `
+		WITH p AS (INSERT INTO projects (status) VALUES ('active') RETURNING id)
+		INSERT INTO pages (project_id, title) SELECT id, 'tunnel' FROM p`); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("open tasks are listed by due date and the filters narrow them", func(t *testing.T) {
-		tunnel := idOf(t, `SELECT id FROM projects WHERE name = $1`, "tunnel")
+		tunnel := projectID(t, "tunnel")
 		addTask(t, "Visa", "", "2026-10-10")
 		addTask(t, "Architecture", tunnel, "2026-10-01")
 		addTask(t, "Laundry", "", "")
@@ -156,7 +162,7 @@ func TestTasks(t *testing.T) {
 
 	t.Run("a project gets a drive folder, and renaming it renames the folder", func(t *testing.T) {
 		rec := s.post(t, "/task/projects/new", url.Values{"name": {"Heriot Watt"}}, session)
-		heriot := idOf(t, `SELECT id FROM projects WHERE name = $1`, "Heriot Watt")
+		heriot := projectID(t, "Heriot Watt")
 		wantRedirect(t, rec, "/task/projects/"+heriot)
 		var parent string
 		if err := s.db.QueryRowContext(t.Context(), `SELECT p.name FROM folders f JOIN folders p ON p.id = f.parent_id WHERE f.name = 'Heriot Watt'`).Scan(&parent); err != nil || parent != "Projects" {
@@ -171,7 +177,7 @@ func TestTasks(t *testing.T) {
 		edit := url.Values{"name": {"Heriot-Watt MSc"}, "status": {"active"}, "started": {"2026-09-01"}, "finished": {""}, "body": {""}}
 		wantRedirect(t, send(t, "/task/projects/"+heriot+"/edit", edit), "/task/projects/"+heriot)
 		var folder string
-		if err := s.db.QueryRowContext(t.Context(), `SELECT f.name FROM folders f JOIN projects p ON p.folder_id = f.id WHERE p.id = $1`, heriot).Scan(&folder); err != nil || folder != "Heriot-Watt MSc" {
+		if err := s.db.QueryRowContext(t.Context(), `SELECT f.name FROM folders f JOIN pages pg ON pg.folder_id = f.id WHERE pg.project_id = $1`, heriot).Scan(&folder); err != nil || folder != "Heriot-Watt MSc" {
 			t.Errorf("project folder = %q, %v, want Heriot-Watt MSc", folder, err)
 		}
 	})
@@ -184,13 +190,13 @@ func TestTasks(t *testing.T) {
 			t.Errorf("project over an existing folder = %d, want 422", rec.Code)
 		}
 		var n int
-		if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM projects WHERE name = 'Blog'`).Scan(&n); err != nil || n != 0 {
+		if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM pages WHERE title = 'Blog' AND project_id IS NOT NULL`).Scan(&n); err != nil || n != 0 {
 			t.Errorf("Blog projects = %d, %v, want 0", n, err)
 		}
 	})
 
 	t.Run("a task's body renders as markdown", func(t *testing.T) {
-		heriot := idOf(t, `SELECT id FROM projects WHERE name = $1`, "Heriot-Watt MSc")
+		heriot := projectID(t, "Heriot-Watt MSc")
 		addTask(t, "Enrol", heriot, "")
 		enrol := taskID(t, "Enrol")
 		edit := url.Values{"title": {"Enrol"}, "project": {heriot}, "status": {"todo"}, "due": {""}, "body": {"# Steps\n- [x] passport"}}
@@ -251,13 +257,13 @@ func TestTasks(t *testing.T) {
 	})
 
 	t.Run("changing a task's project moves its folder along", func(t *testing.T) {
-		heriot := idOf(t, `SELECT id FROM projects WHERE name = $1`, "Heriot-Watt MSc")
-		tunnel := idOf(t, `SELECT id FROM projects WHERE name = $1`, "tunnel")
+		heriot := projectID(t, "Heriot-Watt MSc")
+		tunnel := projectID(t, "tunnel")
 		move := func(t *testing.T, title, project string) *httptest.ResponseRecorder {
 			t.Helper()
 			id := taskID(t, title)
 			var text string
-			if err := s.db.QueryRowContext(t.Context(), `SELECT body FROM tasks WHERE id = $1`, id).Scan(&text); err != nil {
+			if err := s.db.QueryRowContext(t.Context(), `SELECT body FROM pages WHERE task_id = $1`, id).Scan(&text); err != nil {
 				t.Fatal(err)
 			}
 			edit := url.Values{"title": {title}, "project": {project}, "status": {"todo"}, "due": {""}, "body": {text}}
@@ -268,48 +274,80 @@ func TestTasks(t *testing.T) {
 			t.Errorf("folder of a task moved from the inbox = %v, want Projects/Heriot-Watt MSc/Tasks/Laundry", path)
 		}
 		wantRedirect(t, move(t, "Visa", tunnel), "/task/tasks/"+taskID(t, "Visa"))
-		if project := idOf(t, `SELECT project_id FROM tasks WHERE title = $1`, "Visa"); project != tunnel {
+		if project := idOf(t, `SELECT t.project_id FROM tasks t JOIN pages pg ON pg.task_id = t.id WHERE pg.title = $1`, "Visa"); project != tunnel {
 			t.Errorf("project of a task without a folder moved to tunnel = %s, want %s", project, tunnel)
 		}
 		if rec := move(t, "Enrol", tunnel); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("moving a task with a folder to a project without one = %d, want 422", rec.Code)
 		}
-		if project := idOf(t, `SELECT project_id FROM tasks WHERE title = $1`, "Enrol"); project != heriot {
+		if project := idOf(t, `SELECT t.project_id FROM tasks t JOIN pages pg ON pg.task_id = t.id WHERE pg.title = $1`, "Enrol"); project != heriot {
 			t.Errorf("project after a refused move = %s, want %s", project, heriot)
 		}
 	})
 
 	t.Run("status, project, and due change right from the list", func(t *testing.T) {
 		visa := taskID(t, "Visa")
+		text := "if [[ -f x ]]; then echo; fi"
+		if _, err := s.db.ExecContext(t.Context(), `UPDATE pages SET body = $2 WHERE task_id = $1`, visa, text); err != nil {
+			t.Fatal(err)
+		}
 		fields := url.Values{"project": {""}, "status": {"in_progress"}, "due": {"2026-10-20"}, "next": {"/task/tasks?status=all"}}
 		wantRedirect(t, s.post(t, "/task/tasks/"+visa+"/fields", fields, session), "/task/tasks?status=all")
+		var saved string
+		if err := s.db.QueryRowContext(t.Context(), `SELECT body FROM pages WHERE task_id = $1`, visa).Scan(&saved); err != nil || saved != text {
+			t.Errorf("body after a change from the list = %q, %v, want it untouched: %q", saved, err, text)
+		}
 		var got string
 		if err := s.db.QueryRowContext(t.Context(), `SELECT coalesce(project_id::text, 'inbox') || ' ' || status || ' ' || due_on::text FROM tasks WHERE id = $1`, visa).Scan(&got); err != nil || got != "inbox in_progress 2026-10-20" {
 			t.Errorf("Visa after a change from the list = %q, %v, want inbox in_progress 2026-10-20", got, err)
 		}
-		tunnel := idOf(t, `SELECT id FROM projects WHERE name = $1`, "tunnel")
+		tunnel := projectID(t, "tunnel")
 		move := url.Values{"project": {tunnel}, "status": {"todo"}, "due": {""}, "next": {"/task/tasks"}}
 		if rec := s.post(t, "/task/tasks/"+taskID(t, "Enrol")+"/fields", move, session); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("moving a task with a folder to a project without one from the list = %d, want 422", rec.Code)
 		}
 	})
 
-	t.Run("deleting moves the folders to the trash", func(t *testing.T) {
+	t.Run("[[Title]] in a project body makes a subpage under the project", func(t *testing.T) {
+		heriot := projectID(t, "Heriot-Watt MSc")
+		edit := url.Values{"name": {"Heriot-Watt MSc"}, "status": {"active"}, "started": {"2026-09-01"}, "finished": {""}, "body": {"Read [[Reading list]] first."}}
+		wantRedirect(t, send(t, "/task/projects/"+heriot+"/edit", edit), "/task/projects/"+heriot)
+		list := idOf(t, `SELECT id FROM pages WHERE title = $1`, "Reading list")
+		if page := body(t, "/task/projects/"+heriot); !strings.Contains(page, `href="/page/pages/`+list+`"`) {
+			t.Errorf("project page does not link its subpage:\n%s", page)
+		}
+		if page := body(t, "/page/pages/"+list); !strings.Contains(page, `<a href="/task/projects/`+heriot+`">Heriot-Watt MSc</a>`) {
+			t.Errorf("the subpage's path does not lead to the project:\n%s", page)
+		}
+	})
+
+	t.Run("deleting moves the pages to the page trash and keeps the folders", func(t *testing.T) {
 		laundry := taskID(t, "Laundry")
 		laundryFolder, _ := folderOf(t, laundry)
+		laundryPage := idOf(t, `SELECT id FROM pages WHERE task_id = $1`, laundry)
 		wantRedirect(t, s.post(t, "/task/tasks/"+laundry+"/delete", url.Values{"next": {"/task/tasks"}}, session), "/task/tasks")
-		if !trashed(t, laundryFolder) {
-			t.Errorf("a deleted task's folder is not in the trash")
+		if trashed(t, laundryFolder) {
+			t.Errorf("a deleted task's folder is in the drive trash")
 		}
-		heriot := idOf(t, `SELECT id FROM projects WHERE name = $1`, "Heriot-Watt MSc")
-		projectFolder := idOf(t, `SELECT folder_id FROM projects WHERE name = $1`, "Heriot-Watt MSc")
+		heriot := projectID(t, "Heriot-Watt MSc")
+		heriotPage := idOf(t, `SELECT id FROM pages WHERE project_id = $1`, heriot)
+		enrolPage := idOf(t, `SELECT id FROM pages WHERE task_id = $1`, taskID(t, "Enrol"))
 		wantRedirect(t, s.post(t, "/task/projects/"+heriot+"/delete", nil, session), "/task/projects")
-		var n int
-		if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM tasks WHERE title = 'Enrol'`).Scan(&n); err != nil || n != 0 {
-			t.Errorf("Enrol tasks after deleting its project = %d, %v, want 0", n, err)
+		if rec := s.post(t, "/task/projects/new", url.Values{"name": {"Heriot-Watt MSc"}}, session); rec.Code != http.StatusSeeOther {
+			t.Errorf("a new project named after a deleted one = %d, want 303", rec.Code)
 		}
-		if !trashed(t, projectFolder) {
-			t.Errorf("a deleted project's folder is not in the trash")
+		var n int
+		query := `SELECT count(*) FROM pages WHERE id IN ($1, $2, $3) AND trashed_at IS NOT NULL AND project_id IS NULL AND task_id IS NULL`
+		if err := s.db.QueryRowContext(t.Context(), query, laundryPage, heriotPage, enrolPage).Scan(&n); err != nil || n != 3 {
+			t.Errorf("pages of the deleted task, project, and its task in the trash = %d, %v, want 3", n, err)
+		}
+	})
+
+	t.Run("a deleted task's page comes back as a page of its own", func(t *testing.T) {
+		laundry := idOf(t, `SELECT id FROM pages WHERE title = $1`, "Laundry")
+		wantRedirect(t, s.post(t, "/page/trash/"+laundry+"/restore", nil, session), "/page/trash")
+		if page := body(t, "/page"); !strings.Contains(page, ">Laundry</a>") {
+			t.Errorf("Pages does not list the restored task page:\n%s", page)
 		}
 	})
 

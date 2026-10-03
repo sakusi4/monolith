@@ -1,0 +1,41 @@
+{{define "title"}}Page trash{{end}}
+{{define "content"}}
+<header>
+  <nav aria-label="Breadcrumb"><a href="/page">Pages</a></nav>
+  <h1>Page trash</h1>
+  {{if .Rows}}
+  <div class="actions">
+    <form method="post" action="/page/trash/empty" onsubmit="return confirm('Delete every page in the trash for good?')">
+      <button type="submit" class="danger">Empty trash</button>
+    </form>
+  </div>
+  {{end}}
+</header>
+{{with .Error}}<p role="alert">{{.}}</p>{{end}}
+{{if .Rows}}
+<table>
+  <thead>
+    <tr><th>Title</th><th>Location</th><th>Deleted</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Rows}}
+    <tr>
+      <td>{{.Page.Title}}</td>
+      <td>{{.Page.Location}}</td>
+      <td>{{.Deleted}}</td>
+      <td class="actions">
+        <form method="post" action="{{.RestoreURL}}">
+          <button type="submit" aria-label="Restore {{.Page.Title}}">Restore</button>
+        </form>
+        <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this page and its subpages for good?')">
+          <button type="submit" class="danger" aria-label="Delete {{.Page.Title}} for good">Delete forever</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p>The trash is empty.</p>
+{{end}}
+{{end}}

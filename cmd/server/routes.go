@@ -9,6 +9,7 @@ import (
 	"github.com/sakusi4/monolith/internal/dashboard"
 	"github.com/sakusi4/monolith/internal/drive"
 	"github.com/sakusi4/monolith/internal/finance"
+	"github.com/sakusi4/monolith/internal/page"
 	"github.com/sakusi4/monolith/internal/task"
 	"github.com/sakusi4/monolith/web"
 )
@@ -18,7 +19,9 @@ func routes(db *sql.DB, loc *time.Location, driveStore *drive.Store, maxUpload i
 	requireAuth := auth.Require(authStore)
 	financeStore := finance.NewStore(db)
 	driveHandler := requireAuth(drive.NewHandler(driveStore, loc, maxUpload))
-	taskStore := task.NewStore(db, driveStore)
+	pageStore := page.NewStore(db, driveStore)
+	taskStore := task.NewStore(db, driveStore, pageStore)
+	pageHandler := requireAuth(page.NewHandler(pageStore, loc, maxUpload))
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /{$}", http.RedirectHandler("/dashboard", http.StatusSeeOther))
@@ -27,6 +30,8 @@ func routes(db *sql.DB, loc *time.Location, driveStore *drive.Store, maxUpload i
 	mux.Handle("/dashboard", requireAuth(dashboard.NewHandler()))
 	mux.Handle("/drive", driveHandler)
 	mux.Handle("/drive/", driveHandler)
+	mux.Handle("/page", pageHandler)
+	mux.Handle("/page/", pageHandler)
 	mux.Handle("/task/", requireAuth(task.NewHandler(taskStore, loc, maxUpload)))
 	mux.Handle("/finance/", requireAuth(finance.NewHandler(financeStore, loc)))
 	return http.NewCrossOriginProtection().Handler(mux)

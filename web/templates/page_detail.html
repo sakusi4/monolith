@@ -1,0 +1,18 @@
+{{define "title"}}{{.Page.Title}}{{end}}
+{{define "content"}}
+<header>
+  <nav aria-label="Breadcrumb">{{range $i, $c := .Crumbs}}{{if $i}} / {{end}}<a href="{{$c.URL}}">{{$c.Title}}</a>{{end}}</nav>
+  <h1>{{.Page.Title}}</h1>
+  <div class="actions">
+    <a class="button" href="{{.EditURL}}">Edit</a>
+    <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Move this page and its subpages to the trash?')">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </div>
+</header>
+<article aria-label="Content">
+  {{with .Page.Body}}{{markdown .}}{{else}}<p>No content.</p>{{end}}
+</article>
+{{template "page-links" .Links}}
+{{template "attachments" .Attachments}}
+{{end}}

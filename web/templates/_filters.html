@@ -1,6 +1,11 @@
 {{define "filters"}}
 <search>
   <form method="get" id="filters" action="{{.Action}}" hx-boost="true">
+    {{if .Search.Name}}
+    <label>{{.Search.Label}}
+      <input type="search" name="{{.Search.Name}}" value="{{.Search.Value}}">
+    </label>
+    {{end}}
     {{range .Filters}}
     <label>{{.Label}}
       <select name="{{.Name}}">
