@@ -4,7 +4,7 @@ ADMIN_EMAIL ?= admin@localhost
 ADMIN_PASSWORD ?= admin
 export DATABASE_URL TEST_DATABASE_URL ADMIN_EMAIL ADMIN_PASSWORD
 
-.PHONY: db run dev test build check
+.PHONY: db run dev test build check editor
 
 db:
 	docker compose up -d --wait db
@@ -17,7 +17,7 @@ dev: db
 		-build.cmd "go build -o tmp/server ./cmd/server" \
 		-build.entrypoint tmp/server \
 		-build.include_ext go,html,css,js,sql \
-		-build.exclude_dir assets,tmp,vendor,testdata,db_data,files_data,backup,bin \
+		-build.exclude_dir assets,tmp,vendor,testdata,db_data,files_data,backup,bin,node_modules \
 		-build.send_interrupt true
 
 test: db
@@ -31,3 +31,6 @@ check: db
 	golangci-lint run
 	go test -race ./...
 	go mod tidy -diff
+
+editor:
+	cd web/editor && npm ci && npm run build

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/sakusi4/monolith/internal/drive"
@@ -46,15 +45,16 @@ func (s ProjectStatus) Label() string {
 // Project is a project with the name, body, and folder of its page and the number of its tasks that
 // are still open. The dates are zero when unset, and FolderID is 0 once its drive folder is deleted.
 type Project struct {
-	ID         int64
-	PageID     int64
-	Name       string
-	Status     ProjectStatus
-	StartedOn  time.Time
-	FinishedOn time.Time
-	Body       string
-	FolderID   int64
-	OpenTasks  int
+	ID            int64
+	PageID        int64
+	PageUpdatedAt time.Time
+	Name          string
+	Status        ProjectStatus
+	StartedOn     time.Time
+	FinishedOn    time.Time
+	Body          string
+	FolderID      int64
+	OpenTasks     int
 }
 
 // ProjectInput is a project as created or edited. The dates are zero when unset.
@@ -63,7 +63,6 @@ type ProjectInput struct {
 	Status     ProjectStatus
 	StartedOn  time.Time
 	FinishedOn time.Time
-	Body       string
 }
 
 // Clean applies the drive's folder name rule to the name, which also names the project's folder.
@@ -73,7 +72,6 @@ func (in ProjectInput) Clean() (ProjectInput, error) {
 		return ProjectInput{}, fmt.Errorf("%w: %w", ErrInvalidProject, err)
 	}
 	in.Name = name
-	in.Body = strings.TrimSpace(in.Body)
 	switch {
 	case !slices.Contains(projectStatuses, in.Status):
 		return ProjectInput{}, fmt.Errorf("%w: unknown status %q", ErrInvalidProject, in.Status)
@@ -111,7 +109,7 @@ func (s *Store) projects(ctx context.Context, statuses []ProjectStatus, id int64
 		open[i] = string(st)
 	}
 	query := `
-		SELECT p.id, pg.id, pg.title, p.status, p.started_on, p.finished_on, pg.body, pg.folder_id,
+		SELECT p.id, pg.id, pg.updated_at, pg.title, p.status, p.started_on, p.finished_on, pg.body, pg.folder_id,
 			count(t.id) FILTER (WHERE t.status = ANY($3))
 		FROM projects p
 		JOIN pages pg ON pg.project_id = p.id
@@ -131,7 +129,7 @@ func (s *Store) projects(ctx context.Context, statuses []ProjectStatus, id int64
 			started, finished sql.Null[time.Time]
 			folder            sql.Null[int64]
 		)
-		if err := rows.Scan(&p.ID, &p.PageID, &p.Name, &p.Status, &started, &finished, &p.Body, &folder, &p.OpenTasks); err != nil {
+		if err := rows.Scan(&p.ID, &p.PageID, &p.PageUpdatedAt, &p.Name, &p.Status, &started, &finished, &p.Body, &folder, &p.OpenTasks); err != nil {
 			return nil, fmt.Errorf("scan project: %w", err)
 		}
 		p.StartedOn, p.FinishedOn, p.FolderID = started.V, finished.V, folder.V
@@ -201,47 +199,59 @@ func (s *Store) insertProject(ctx context.Context, in ProjectInput, folder int64
 	return id, nil
 }
 
-// UpdateProject saves in as project id and renames its drive folder with it, unless the folder is
-// gone or in the trash. It saves the name and body to the project's page, which attaches the uploads
-// that the body links to and moves the files it no longer links to the trash as page.Store.Save
-// does. It returns the errors of CreateProject, the errors of AttachToProject when an upload cannot
-// be attached, and ErrNotFound when there is no such project.
-func (s *Store) UpdateProject(ctx context.Context, id int64, in ProjectInput, uploads []drive.Upload) error {
-	in, err := in.Clean()
-	if err != nil {
-		return errors.Join(err, s.drive.Discard(uploads))
-	}
+// UpdateProjectFields saves the status and dates of project id. It returns ErrInvalidProject when
+// the status is unknown or the project finishes before it starts, and ErrNotFound when there is no
+// such project.
+func (s *Store) UpdateProjectFields(ctx context.Context, id int64, status ProjectStatus, started, finished time.Time) error {
 	cur, err := s.Project(ctx, id)
-	if err != nil {
-		return errors.Join(err, s.drive.Discard(uploads))
-	}
-	taken, err := s.nameTaken(ctx, in.Name, id)
-	if err != nil {
-		return errors.Join(err, s.drive.Discard(uploads))
-	}
-	if taken {
-		return errors.Join(ErrNameTaken, s.drive.Discard(uploads))
-	}
-	if in.Name != cur.Name && cur.FolderID != 0 {
-		if err := s.renameFolder(ctx, cur.FolderID, in.Name); err != nil {
-			return errors.Join(err, s.drive.Discard(uploads))
-		}
-	}
-	err = s.pages.Save(ctx, cur.PageID, page.Input{Title: in.Name, Body: in.Body}, uploads, func(used []drive.Upload) ([]drive.File, error) {
-		return s.AttachToProject(ctx, id, used)
-	})
-	if errors.Is(err, page.ErrTitleTaken) {
-		return ErrNameTaken
-	}
 	if err != nil {
 		return err
 	}
+	if _, err := (ProjectInput{Name: cur.Name, Status: status, StartedOn: started, FinishedOn: finished}).Clean(); err != nil {
+		return err
+	}
 	query := `UPDATE projects SET status = $2, started_on = $3, finished_on = $4, updated_at = now() WHERE id = $1`
-	res, err := s.db.ExecContext(ctx, query, id, in.Status, nullDate(in.StartedOn), nullDate(in.FinishedOn))
+	res, err := s.db.ExecContext(ctx, query, id, status, nullDate(started), nullDate(finished))
 	if err != nil {
 		return fmt.Errorf("update project: %w", err)
 	}
 	return requireRow(res)
+}
+
+// SaveProjectContent saves name and body as the page of project id if it was last saved at version,
+// and renames the project's drive folder with the name, unless the folder is gone or in the trash.
+// It returns the next version, ErrInvalidProject when the name breaks the drive's name rule,
+// ErrNameTaken or ErrFolderTaken when another project or folder has the name, and the errors of
+// page.Store.SaveContent.
+func (s *Store) SaveProjectContent(ctx context.Context, id int64, name, body string, version time.Time) (time.Time, error) {
+	name, err := drive.CleanName(name)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %w", ErrInvalidProject, err)
+	}
+	cur, err := s.Project(ctx, id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	taken, err := s.nameTaken(ctx, name, id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if taken {
+		return time.Time{}, ErrNameTaken
+	}
+	if !cur.PageUpdatedAt.Equal(version) {
+		return time.Time{}, page.ErrStale
+	}
+	if name != cur.Name && cur.FolderID != 0 {
+		if err := s.renameFolder(ctx, cur.FolderID, name); err != nil {
+			return time.Time{}, err
+		}
+	}
+	saved, err := s.pages.SaveContent(ctx, cur.PageID, name, body, version)
+	if errors.Is(err, page.ErrTitleTaken) {
+		return time.Time{}, ErrNameTaken
+	}
+	return saved, err
 }
 
 // renameFolder renames the drive folder id to name, unless it is gone or in the trash.

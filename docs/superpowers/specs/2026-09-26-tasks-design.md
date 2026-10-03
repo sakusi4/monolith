@@ -6,7 +6,7 @@
 
 노션의 Projects와 Todo HQ를 대체한다. 프로젝트는 관련된 모든 자료를 모으는 곳이고, 할 일은 한 목록에 모두 모아 프로젝트와 연결해 한 화면에서 본다. 할 일과 프로젝트는 각자 상세 내용(마크다운 본문, 본문 속 이미지, 첨부 파일)을 가진다. 프로젝트는 다른 기능이 가리키는 허브다: 할 일과 드라이브 폴더가(나중에 메모도) 외래 키로 프로젝트를 가리키고, 프로젝트 화면이 그것들을 모아 보인다. 사이드바에 **Work** 섹션을 두고 **Tasks**(`/task/tasks`)와 **Projects**(`/task/projects`)를 둔다.
 
-프로젝트와 할 일의 이름·제목, 본문, 첨부 폴더는 그 페이지가 가진다(`2026-10-02-pages-design.md`). 이 문서의 본문·첨부·삭제 규칙 중 그 문서와 다른 것은 그 문서를 따른다.
+프로젝트와 할 일의 이름·제목, 본문, 첨부 폴더는 그 페이지가 가진다(`2026-10-02-pages-design.md`). 이 문서의 본문·첨부·삭제 규칙 중 그 문서와 다른 것은 그 문서를 따른다. 본문과 제목 편집, 상세 화면의 칸 저장, 수정 화면은 `2026-10-03-page-editor-design.md`가 바꿨다(할 일 수정 화면과 프로젝트 Edit 모드는 없어졌다).
 
 ## 결정 사항
 
@@ -170,9 +170,9 @@ htmx는 지출 화면과 같은 방식으로 목록 화면들과 프로젝트 �
 | 파일 | 내용 |
 |---|---|
 | `internal/postgres/migrations/0011.sql` | `projects`, `tasks` |
-| `internal/task/task.go` | 패키지 문서, `Store`(`*sql.DB`, `*drive.Store`), `Task`, `TaskStatus`와 표시 이름, `TaskInput`과 `Clean`, 할 일 Store 메서드 |
+| `internal/task/task.go` | 패키지 문서, `Store`(`*sql.DB`, `*drive.Store`, `*page.Store`), `Task`, `TaskStatus`와 표시 이름, `TaskInput`과 `Clean`, 할 일 Store 메서드 |
 | `internal/task/project.go` | `Project`, `ProjectStatus`와 표시 이름, `ProjectInput`과 `Clean`, 프로젝트 Store 메서드(드라이브 연동 포함) |
-| `internal/task/attachment.go` | 할 일 폴더 이름 규칙(`taskFolderName`), 폴더 찾기·만들기, 첨부 올리기. 본문이 가리키는 업로드 고르기와 링크 바꾸기(`usedUploads`, `linkFiles`)는 `internal/page/attachment.go`로 옮겼다 |
+| `internal/task/attachment.go` | 할 일 폴더 이름 규칙(`taskFolderName`), 폴더 찾기·만들기, 첨부 올리기 |
 | `internal/task/task_list.go` | `taskQuery`: 쿼리 해석, 필터 막대, 정렬, 목록 주소 |
 | `internal/task/handler.go` | `NewHandler`, 라우트, 공통 도우미(`next` 해석, 업로드 읽기 등) |
 | `internal/task/task_handler.go`, `project_handler.go` | 할 일, 프로젝트 핸들러 |

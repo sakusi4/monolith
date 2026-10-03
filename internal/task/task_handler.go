@@ -17,35 +17,19 @@ type taskListPage struct {
 
 type taskPage struct {
 	Task        Task
+	Editor      page.Editor
+	Projects    []Project
+	Statuses    []TaskStatus
 	ProjectURL  string
 	Due         string
 	Completed   string
-	Attachments drive.Attachments
 	Links       page.Links
-	EditURL     string
-	DeleteURL   string
-}
-
-type taskEditPage struct {
-	Task        Task
-	Form        taskForm
-	Projects    []Project
-	Statuses    []TaskStatus
 	Attachments drive.Attachments
 	Error       string
 	URL         string
+	FieldsURL   string
 	FilesURL    string
-	CancelURL   string
-}
-
-// taskForm holds the edit form's values as the user typed them.
-type taskForm struct {
-	Title     string
-	ProjectID int64
-	Status    TaskStatus
-	Due       string
-	Body      string
-	Submitted bool
+	DeleteURL   string
 }
 
 func (h *handler) listTasks(w http.ResponseWriter, r *http.Request) {
@@ -113,122 +97,95 @@ func (h *handler) showTask(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	t, err := h.store.Task(r.Context(), id)
+	h.renderTask(w, r, http.StatusOK, id, "")
+}
+
+// renderTask shows task id with problem from a change of its fields or an attachment that failed.
+func (h *handler) renderTask(w http.ResponseWriter, r *http.Request, status int, id int64, problem string) {
+	ctx := r.Context()
+	t, err := h.store.Task(ctx, id)
 	if err != nil {
 		respondError(w, r, err)
 		return
 	}
-	sec, err := h.store.drive.Attachments(r.Context(), t.FolderID)
+	projects, err := h.store.Projects(ctx, projectStatuses)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
 	}
-	links, err := h.store.pages.Links(r.Context(), t.PageID)
+	sec, err := h.store.drive.Attachments(ctx, t.FolderID)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
 	}
-	view := taskPage{Task: t, Attachments: sec, Links: links, EditURL: taskURL(id) + "/edit", DeleteURL: taskURL(id) + "/delete"}
+	links, err := h.store.pages.Links(ctx, t.PageID)
+	if err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	u := taskURL(id)
+	view := taskPage{
+		Task:        t,
+		Editor:      page.Editor{PageID: t.PageID, Title: t.Title, Body: t.Body, Version: page.FormatVersion(t.PageUpdatedAt), ContentURL: u + "/content", ImagesURL: u + "/images"},
+		Projects:    projects,
+		Statuses:    taskStatuses,
+		Due:         dateInput(t.Due),
+		Links:       links,
+		Attachments: sec,
+		Error:       problem,
+		URL:         u,
+		FieldsURL:   u + "/fields",
+		FilesURL:    u + "/files",
+		DeleteURL:   u + "/delete",
+	}
 	if t.ProjectID != 0 {
 		view.ProjectURL = projectURL(t.ProjectID)
-	}
-	if !t.Due.IsZero() {
-		view.Due = t.Due.Format(dateLayout)
 	}
 	if !t.CompletedAt.IsZero() {
 		view.Completed = t.CompletedAt.In(h.loc).Format(dateLayout)
 	}
-	web.Render(w, r, http.StatusOK, "task_detail", view)
+	web.Render(w, r, status, "task_detail", view)
 }
 
-func (h *handler) editTask(w http.ResponseWriter, r *http.Request) {
+func (h *handler) saveTaskContent(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	h.renderTaskEdit(w, r, http.StatusOK, id, taskForm{}, "")
+	version, err := page.ParseVersion(r.PostFormValue("version"))
+	if err != nil {
+		http.Error(w, "Invalid version.", http.StatusBadRequest)
+		return
+	}
+	saved, err := h.store.SaveTaskContent(r.Context(), id, r.PostFormValue("title"), r.PostFormValue("body"), version)
+	if errors.Is(err, ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	problem := ""
+	if errors.Is(err, ErrInvalidTask) {
+		problem = titleProblem
+	}
+	page.RespondSaved(w, r, saved, err, problem)
 }
 
-// renderTaskEdit shows the edit page of task id with form, or with the task's values when form is
-// not submitted.
-func (h *handler) renderTaskEdit(w http.ResponseWriter, r *http.Request, status int, id int64, form taskForm, problem string) {
-	t, err := h.store.Task(r.Context(), id)
-	if err != nil {
-		respondError(w, r, err)
-		return
-	}
-	sec, err := h.store.drive.Attachments(r.Context(), t.FolderID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	projects, err := h.store.Projects(r.Context(), projectStatuses)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	if !form.Submitted {
-		form = taskForm{Title: t.Title, ProjectID: t.ProjectID, Status: t.Status, Due: dateInput(t.Due), Body: t.Body}
-	}
-	u := taskURL(id)
-	view := taskEditPage{
-		Task:        t,
-		Form:        form,
-		Projects:    projects,
-		Statuses:    taskStatuses,
-		Attachments: sec,
-		Error:       problem,
-		URL:         u + "/edit",
-		FilesURL:    u + "/files",
-		CancelURL:   u,
-	}
-	web.Render(w, r, status, "task_edit", view)
-}
-
-func (h *handler) updateTask(w http.ResponseWriter, r *http.Request) {
+func (h *handler) uploadTaskImages(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	fields, uploads, ok := h.receive(w, r)
+	_, uploads, ok := h.receive(w, r)
 	if !ok {
 		return
 	}
-	form := taskForm{
-		Title:     fields.Get("title"),
-		Status:    TaskStatus(fields.Get("status")),
-		Due:       fields.Get("due"),
-		Body:      fields.Get("body"),
-		Submitted: true,
-	}
-	project, okProject := parseID(fields.Get("project"))
-	due, okDue := parseDate(form.Due)
-	if !okProject || !okDue {
-		if err := h.store.drive.Discard(uploads); err != nil {
-			web.ServerError(w, r, err)
-			return
-		}
-		if !okProject {
-			http.Error(w, "Invalid project.", http.StatusBadRequest)
-			return
-		}
-		h.renderTaskEdit(w, r, http.StatusUnprocessableEntity, id, form, dueProblem)
+	files, err := h.store.AttachToTask(r.Context(), id, uploads)
+	if errors.Is(err, ErrNotFound) {
+		http.NotFound(w, r)
 		return
 	}
-	form.ProjectID = project
-	err := h.store.UpdateTask(r.Context(), id, TaskInput{Title: form.Title, ProjectID: project, Status: form.Status, Due: due, Body: form.Body}, uploads)
-	switch {
-	case errors.Is(err, ErrInvalidTask):
-		h.renderTaskEdit(w, r, http.StatusUnprocessableEntity, id, form, taskProblem)
-	case attachProblem(err) != "":
-		h.renderTaskEdit(w, r, http.StatusUnprocessableEntity, id, form, attachProblem(err))
-	case err != nil:
-		respondError(w, r, err)
-	default:
-		http.Redirect(w, r, taskURL(id), http.StatusSeeOther)
-	}
+	page.RespondUploaded(w, r, files, err, attachProblem(err))
 }
 
 // updateTaskFields saves the project, status, and due date that a row of a task table sends,
@@ -246,13 +203,7 @@ func (h *handler) updateTaskFields(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid task.", http.StatusBadRequest)
 		return
 	}
-	t, err := h.store.Task(r.Context(), id)
-	if err != nil {
-		respondError(w, r, err)
-		return
-	}
-	in := TaskInput{Title: t.Title, ProjectID: project, Status: TaskStatus(r.PostFormValue("status")), Due: due, Body: t.Body}
-	err = h.store.UpdateTask(r.Context(), id, in, nil)
+	err := h.store.UpdateTaskFields(r.Context(), id, project, TaskStatus(r.PostFormValue("status")), due)
 	switch {
 	case errors.Is(err, ErrInvalidTask):
 		h.renderNext(w, r, http.StatusUnprocessableEntity, next, addForm{}, taskProblem)
@@ -276,19 +227,19 @@ func (h *handler) attachTaskFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(uploads) == 0 {
-		http.Error(w, noFilesProblem, http.StatusUnprocessableEntity)
+		h.renderTask(w, r, http.StatusUnprocessableEntity, id, noFilesProblem)
 		return
 	}
 	_, err := h.store.AttachToTask(r.Context(), id, uploads)
 	if problem := attachProblem(err); problem != "" {
-		h.renderTaskEdit(w, r, http.StatusUnprocessableEntity, id, taskForm{}, problem)
+		h.renderTask(w, r, http.StatusUnprocessableEntity, id, problem)
 		return
 	}
 	if err != nil {
 		respondError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, taskURL(id)+"/edit", http.StatusSeeOther)
+	http.Redirect(w, r, taskURL(id), http.StatusSeeOther)
 }
 
 func (h *handler) deleteTask(w http.ResponseWriter, r *http.Request) {

@@ -79,17 +79,18 @@ func (s TaskStatus) IsOpen() bool {
 // body, and folder of its page. Due and CompletedAt are zero when unset, and FolderID is 0 until the
 // task has attachments.
 type Task struct {
-	ID          int64
-	PageID      int64
-	Title       string
-	ProjectID   int64
-	ProjectName string
-	Status      TaskStatus
-	Due         time.Time
-	Body        string
-	FolderID    int64
-	CompletedAt time.Time
-	CreatedAt   time.Time
+	ID            int64
+	PageID        int64
+	PageUpdatedAt time.Time
+	Title         string
+	ProjectID     int64
+	ProjectName   string
+	Status        TaskStatus
+	Due           time.Time
+	Body          string
+	FolderID      int64
+	CompletedAt   time.Time
+	CreatedAt     time.Time
 }
 
 // TaskInput is a task as added or edited. ProjectID is 0 for the inbox, and Due is zero for no due date.
@@ -98,7 +99,6 @@ type TaskInput struct {
 	ProjectID int64
 	Status    TaskStatus
 	Due       time.Time
-	Body      string
 }
 
 // TaskFilter picks the tasks with one of Statuses, in project ProjectID or in every project when
@@ -111,7 +111,6 @@ type TaskFilter struct {
 
 func (in TaskInput) Clean() (TaskInput, error) {
 	in.Title = strings.TrimSpace(in.Title)
-	in.Body = strings.TrimSpace(in.Body)
 	switch {
 	case in.Title == "":
 		return TaskInput{}, fmt.Errorf("%w: title is empty", ErrInvalidTask)
@@ -169,7 +168,7 @@ func (s *Store) tasks(ctx context.Context, f TaskFilter, id int64) ([]Task, erro
 		statuses[i] = string(st)
 	}
 	query := `
-		SELECT t.id, pg.id, pg.title, t.project_id, coalesce(pp.title, ''), t.status, t.due_on, pg.body, pg.folder_id, t.completed_at, t.created_at
+		SELECT t.id, pg.id, pg.updated_at, pg.title, t.project_id, coalesce(pp.title, ''), t.status, t.due_on, pg.body, pg.folder_id, t.completed_at, t.created_at
 		FROM tasks t
 		JOIN pages pg ON pg.task_id = t.id
 		LEFT JOIN pages pp ON pp.project_id = t.project_id
@@ -187,7 +186,7 @@ func (s *Store) tasks(ctx context.Context, f TaskFilter, id int64) ([]Task, erro
 			project, folder sql.Null[int64]
 			due, completed  sql.Null[time.Time]
 		)
-		if err := rows.Scan(&t.ID, &t.PageID, &t.Title, &project, &t.ProjectName, &t.Status, &due, &t.Body, &folder, &completed, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.PageID, &t.PageUpdatedAt, &t.Title, &project, &t.ProjectName, &t.Status, &due, &t.Body, &folder, &completed, &t.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}
 		t.ProjectID, t.Due, t.FolderID, t.CompletedAt = project.V, due.V, folder.V, completed.V
@@ -231,33 +230,21 @@ func (s *Store) AddTask(ctx context.Context, in TaskInput) error {
 	return nil
 }
 
-// UpdateTask saves in as task id and moves the task's folder to its project and renames it after
-// the title, unless the folder is gone or in the trash. When the title or body changed or uploads
-// came, it saves them to the task's page, which attaches the uploads that the body links to and moves
-// the files it no longer links to the trash as page.Store.Save does. A task saved as done keeps the time it was first completed, and
-// one saved as any other status loses it. It returns ErrInvalidTask when in breaks a rule or names a
-// project that does not exist, ErrNoFolder when the task has a folder and the new project has none,
-// the errors of AttachToTask when an upload cannot be attached, and ErrNotFound when there is no
-// such task.
-func (s *Store) UpdateTask(ctx context.Context, id int64, in TaskInput, uploads []drive.Upload) error {
-	in, err := in.Clean()
-	if err != nil {
-		return errors.Join(err, s.drive.Discard(uploads))
-	}
+// UpdateTaskFields saves the project, status, and due date of task id and moves the task's folder
+// to the new project, unless the folder is gone or in the trash. A task saved as done keeps the time
+// it was first completed, and one saved as any other status loses it. It returns ErrInvalidTask when
+// the status is unknown or the project does not exist, ErrNoFolder when the task has a folder and the
+// new project has none, and ErrNotFound when there is no such task.
+func (s *Store) UpdateTaskFields(ctx context.Context, id, project int64, status TaskStatus, due time.Time) error {
 	cur, err := s.Task(ctx, id)
 	if err != nil {
-		return errors.Join(err, s.drive.Discard(uploads))
+		return err
 	}
-	if in.ProjectID != cur.ProjectID {
-		if err := s.moveTask(ctx, cur, in.ProjectID); err != nil {
-			return errors.Join(err, s.drive.Discard(uploads))
-		}
+	if _, err := (TaskInput{Title: cur.Title, ProjectID: project, Status: status, Due: due}).Clean(); err != nil {
+		return err
 	}
-	if in.Title != cur.Title || in.Body != cur.Body || len(uploads) > 0 {
-		err := s.pages.Save(ctx, cur.PageID, page.Input{Title: in.Title, Body: in.Body}, uploads, func(used []drive.Upload) ([]drive.File, error) {
-			return s.AttachToTask(ctx, id, used)
-		})
-		if err != nil {
+	if project != cur.ProjectID {
+		if err := s.moveTask(ctx, cur, project); err != nil {
 			return err
 		}
 	}
@@ -265,17 +252,35 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, in TaskInput, uploads 
 		UPDATE tasks SET status = $2, due_on = $3,
 			completed_at = CASE WHEN $2 = 'done' THEN coalesce(completed_at, now()) END, updated_at = now()
 		WHERE id = $1`
-	res, err := s.db.ExecContext(ctx, query, id, in.Status, nullDate(in.Due))
+	res, err := s.db.ExecContext(ctx, query, id, status, nullDate(due))
 	if err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
-	if err := requireRow(res); err != nil {
-		return err
+	return requireRow(res)
+}
+
+// SaveTaskContent saves title and body as the page of task id if it was last saved at version, and
+// renames the task's folder after the title, unless the folder is gone or in the trash. It returns
+// the next version, ErrInvalidTask when the title is blank, and the errors of page.Store.SaveContent.
+func (s *Store) SaveTaskContent(ctx context.Context, id int64, title, body string, version time.Time) (time.Time, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return time.Time{}, fmt.Errorf("%w: title is empty", ErrInvalidTask)
 	}
-	if in.Title != cur.Title && cur.FolderID != 0 {
-		return s.renameTaskFolder(ctx, cur, in.Title)
+	cur, err := s.Task(ctx, id)
+	if err != nil {
+		return time.Time{}, err
 	}
-	return nil
+	saved, err := s.pages.SaveContent(ctx, cur.PageID, title, body, version)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if title != cur.Title && cur.FolderID != 0 {
+		if err := s.renameTaskFolder(ctx, cur, title); err != nil {
+			return time.Time{}, err
+		}
+	}
+	return saved, nil
 }
 
 // DeleteTask removes task id and moves its page to the page trash, leaving its drive folder. It

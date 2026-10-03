@@ -1,0 +1,14 @@
+{
+  "name": "monolith-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "7.22.2",
+    "@milkdown/kit": "7.22.2",
+    "esbuild": "0.28.2",
+    "unist-util-visit": "5.1.0"
+  }
+}

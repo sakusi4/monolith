@@ -21,7 +21,7 @@ var files embed.FS
 var pages = parsePages()
 
 func parsePages() map[string]*template.Template {
-	funcs := template.FuncMap{"money": money.Format, "current": currentFunc(""), "markdown": renderMarkdown}
+	funcs := template.FuncMap{"money": money.Format, "current": currentFunc("")}
 	names, err := fs.Glob(files, "templates/*.html")
 	if err != nil {
 		panic(err)

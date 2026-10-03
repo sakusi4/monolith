@@ -17,8 +17,11 @@ const (
 	projectsURL      = "/task/projects"
 	dateLayout       = "Jan 2, 2006"
 	taskProblem      = "Enter a title, and pick the project and status from the lists."
+	titleProblem     = "Enter a title."
+	fieldsProblem    = "Pick a status from the list and dates in order."
 	dueProblem       = "Enter the due date as YYYY-MM-DD."
 	projectProblem   = "Use a name of up to 255 characters without a slash, a status from the list, and dates in order."
+	nameProblem      = "Use a name of up to 255 characters without a slash."
 	nameTakenProblem = "A project with that name already exists."
 	dateProblem      = "Enter dates as YYYY-MM-DD."
 	noFolderProblem  = "The project's folder is missing or in the trash."
@@ -41,16 +44,17 @@ func NewHandler(store *Store, loc *time.Location, maxUpload int64) http.Handler 
 	mux.HandleFunc("GET /task/tasks", h.listTasks)
 	mux.HandleFunc("POST /task/tasks/new", h.createTask)
 	mux.HandleFunc("GET /task/tasks/{id}", h.showTask)
-	mux.HandleFunc("GET /task/tasks/{id}/edit", h.editTask)
-	mux.HandleFunc("POST /task/tasks/{id}/edit", h.updateTask)
 	mux.HandleFunc("POST /task/tasks/{id}/fields", h.updateTaskFields)
+	mux.HandleFunc("POST /task/tasks/{id}/content", h.saveTaskContent)
+	mux.HandleFunc("POST /task/tasks/{id}/images", h.uploadTaskImages)
 	mux.HandleFunc("POST /task/tasks/{id}/files", h.attachTaskFiles)
 	mux.HandleFunc("POST /task/tasks/{id}/delete", h.deleteTask)
 	mux.HandleFunc("GET /task/projects", h.listProjects)
 	mux.HandleFunc("POST /task/projects/new", h.createProject)
 	mux.HandleFunc("GET /task/projects/{id}", h.showProject)
-	mux.HandleFunc("GET /task/projects/{id}/edit", h.editProject)
-	mux.HandleFunc("POST /task/projects/{id}/edit", h.updateProject)
+	mux.HandleFunc("POST /task/projects/{id}/fields", h.updateProjectFields)
+	mux.HandleFunc("POST /task/projects/{id}/content", h.saveProjectContent)
+	mux.HandleFunc("POST /task/projects/{id}/images", h.uploadProjectImages)
 	mux.HandleFunc("POST /task/projects/{id}/files", h.attachProjectFiles)
 	mux.HandleFunc("POST /task/projects/{id}/delete", h.deleteProject)
 	return mux
@@ -115,6 +119,10 @@ func (h *handler) renderNext(w http.ResponseWriter, r *http.Request, status int,
 	}
 	if id, ok := projectIDFromPath(u.Path); ok {
 		h.renderProject(w, r, status, id, projectView{Add: add, Error: problem})
+		return
+	}
+	if id, ok := taskIDFromPath(u.Path); ok {
+		h.renderTask(w, r, status, id, problem)
 		return
 	}
 	q, err := parseTaskQuery(u.Query())
@@ -212,7 +220,16 @@ func projectURL(id int64) string {
 
 // projectIDFromPath reads the id of a project page path.
 func projectIDFromPath(path string) (int64, bool) {
-	rest, ok := strings.CutPrefix(path, projectsURL+"/")
+	return idFromPath(path, projectsURL+"/")
+}
+
+// taskIDFromPath reads the id of a task page path.
+func taskIDFromPath(path string) (int64, bool) {
+	return idFromPath(path, tasksURL+"/")
+}
+
+func idFromPath(path, prefix string) (int64, bool) {
+	rest, ok := strings.CutPrefix(path, prefix)
 	if !ok {
 		return 0, false
 	}

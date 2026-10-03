@@ -1,7 +1,6 @@
 package task
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,38 +25,28 @@ type projectRow struct {
 
 type projectPage struct {
 	Project     Project
-	Period      string
-	Editing     bool
-	Edit        projectForm
+	Editor      page.Editor
 	Statuses    []ProjectStatus
+	Started     string
+	Finished    string
 	Tasks       taskTable
 	AllTasksURL string
-	Attachments drive.Attachments
 	Links       page.Links
+	Attachments drive.Attachments
+	FieldsError string
 	Error       string
 	URL         string
-	EditURL     string
-	DeleteURL   string
+	FieldsURL   string
 	FilesURL    string
+	DeleteURL   string
 }
 
-// projectForm holds a project's form values as the user typed them.
-type projectForm struct {
-	Name      string
-	Status    ProjectStatus
-	Started   string
-	Finished  string
-	Body      string
-	Submitted bool
-}
-
-// projectView is what a request adds to a project page: its own form being edited, rejected input,
-// or a quick add that failed.
+// projectView is what a request adds to a project page: a change of its fields that failed, a quick
+// add or a change in the task table that failed, or an attachment that failed.
 type projectView struct {
-	Editing bool
-	Edit    projectForm
-	Error   string
-	Add     addForm
+	FieldsError string
+	Error       string
+	Add         addForm
 }
 
 func (h *handler) listProjects(w http.ResponseWriter, r *http.Request) {
@@ -114,15 +103,6 @@ func (h *handler) showProject(w http.ResponseWriter, r *http.Request) {
 	h.renderProject(w, r, http.StatusOK, id, projectView{})
 }
 
-func (h *handler) editProject(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	h.renderProject(w, r, http.StatusOK, id, projectView{Editing: true})
-}
-
 func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status int, id int64, view projectView) {
 	ctx := r.Context()
 	p, err := h.store.Project(ctx, id)
@@ -155,64 +135,87 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 	table.ProjectID = id
 	screen := projectPage{
 		Project:     p,
-		Period:      period(p),
-		Editing:     view.Editing,
-		Edit:        view.Edit,
+		Editor:      page.Editor{PageID: p.PageID, Title: p.Name, Body: p.Body, Version: page.FormatVersion(p.PageUpdatedAt), ContentURL: u + "/content", ImagesURL: u + "/images"},
 		Statuses:    projectStatuses,
+		Started:     dateInput(p.StartedOn),
+		Finished:    dateInput(p.FinishedOn),
 		Tasks:       table,
 		AllTasksURL: tasksURL + "?" + taskQuery{Status: statusAll, ProjectID: id, Order: orderDue, Direction: web.Asc}.values().Encode(),
-		Attachments: sec,
 		Links:       links,
+		Attachments: sec,
+		FieldsError: view.FieldsError,
 		Error:       view.Error,
 		URL:         u,
-		EditURL:     u + "/edit",
-		DeleteURL:   u + "/delete",
+		FieldsURL:   u + "/fields",
 		FilesURL:    u + "/files",
-	}
-	if view.Editing && !view.Edit.Submitted {
-		screen.Edit = projectForm{Name: p.Name, Status: p.Status, Started: dateInput(p.StartedOn), Finished: dateInput(p.FinishedOn), Body: p.Body}
+		DeleteURL:   u + "/delete",
 	}
 	web.Render(w, r, status, "project_detail", screen)
 }
 
-func (h *handler) updateProject(w http.ResponseWriter, r *http.Request) {
+func (h *handler) updateProjectFields(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(r)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	fields, uploads, ok := h.receive(w, r)
-	if !ok {
-		return
-	}
-	form := projectForm{
-		Name:      fields.Get("name"),
-		Status:    ProjectStatus(fields.Get("status")),
-		Started:   fields.Get("started"),
-		Finished:  fields.Get("finished"),
-		Body:      fields.Get("body"),
-		Submitted: true,
-	}
-	started, okStarted := parseDate(form.Started)
-	finished, okFinished := parseDate(form.Finished)
+	started, okStarted := parseDate(r.PostFormValue("started"))
+	finished, okFinished := parseDate(r.PostFormValue("finished"))
 	if !okStarted || !okFinished {
-		if err := h.store.drive.Discard(uploads); err != nil {
-			web.ServerError(w, r, err)
-			return
-		}
-		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{Editing: true, Edit: form, Error: dateProblem})
+		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{FieldsError: dateProblem})
 		return
 	}
-	err := h.store.UpdateProject(r.Context(), id, ProjectInput{Name: form.Name, Status: form.Status, StartedOn: started, FinishedOn: finished, Body: form.Body}, uploads)
-	problem := cmp.Or(projectErrorMessage(err, form.Name), attachProblem(err))
+	err := h.store.UpdateProjectFields(r.Context(), id, ProjectStatus(r.PostFormValue("status")), started, finished)
 	switch {
-	case problem != "":
-		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{Editing: true, Edit: form, Error: problem})
+	case errors.Is(err, ErrInvalidProject):
+		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{FieldsError: fieldsProblem})
 	case err != nil:
 		respondError(w, r, err)
 	default:
 		http.Redirect(w, r, projectURL(id), http.StatusSeeOther)
 	}
+}
+
+func (h *handler) saveProjectContent(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	version, err := page.ParseVersion(r.PostFormValue("version"))
+	if err != nil {
+		http.Error(w, "Invalid version.", http.StatusBadRequest)
+		return
+	}
+	name := r.PostFormValue("title")
+	saved, err := h.store.SaveProjectContent(r.Context(), id, name, r.PostFormValue("body"), version)
+	if errors.Is(err, ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	problem := projectErrorMessage(err, name)
+	if errors.Is(err, ErrInvalidProject) {
+		problem = nameProblem
+	}
+	page.RespondSaved(w, r, saved, err, problem)
+}
+
+func (h *handler) uploadProjectImages(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	_, uploads, ok := h.receive(w, r)
+	if !ok {
+		return
+	}
+	files, err := h.store.AttachToProject(r.Context(), id, uploads)
+	if errors.Is(err, ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	page.RespondUploaded(w, r, files, err, attachProblem(err))
 }
 
 func (h *handler) attachProjectFiles(w http.ResponseWriter, r *http.Request) {
@@ -226,19 +229,19 @@ func (h *handler) attachProjectFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(uploads) == 0 {
-		http.Error(w, noFilesProblem, http.StatusUnprocessableEntity)
+		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{Error: noFilesProblem})
 		return
 	}
 	_, err := h.store.AttachToProject(r.Context(), id, uploads)
 	if problem := attachProblem(err); problem != "" {
-		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{Editing: true, Error: problem})
+		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{Error: problem})
 		return
 	}
 	if err != nil {
 		respondError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, projectURL(id)+"/edit", http.StatusSeeOther)
+	http.Redirect(w, r, projectURL(id), http.StatusSeeOther)
 }
 
 func (h *handler) deleteProject(w http.ResponseWriter, r *http.Request) {

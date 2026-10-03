@@ -1,0 +1,6 @@
+{{define "title"}}Links{{end}}
+{{define "body"}}
+<ul id="links">
+  {{range .}}<li><a href="{{.URL}}" data-title="{{.Title}}">{{.Title}}</a> <small>{{.Path}}</small></li>{{end}}
+</ul>
+{{end}}

@@ -1,0 +1,16 @@
+{{define "editor-head"}}
+<link rel="stylesheet" href="/static/editor-7.22.2.css">
+<script type="module" src="/static/editor-7.22.2.js"></script>
+{{end}}
+
+{{define "editor-title"}}
+<h1><input value="{{.Title}}" aria-label="Title" autocomplete="off" data-editor-title></h1>
+<p role="status" data-editor-status></p>
+{{end}}
+
+{{define "editor"}}
+<article aria-label="Content" data-editor data-page-id="{{.PageID}}" data-version="{{.Version}}" data-content-url="{{.ContentURL}}" data-images-url="{{.ImagesURL}}">
+  <textarea hidden aria-hidden="true">{{.Body}}</textarea>
+  <div data-editor-mount></div>
+</article>
+{{end}}

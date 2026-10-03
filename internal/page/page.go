@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/text/unicode/norm"
@@ -32,6 +33,7 @@ var (
 	ErrInvalidParent = errors.New("invalid parent")
 	ErrTitleTaken    = errors.New("project title taken")
 	ErrParentTrashed = errors.New("parent page in the trash")
+	ErrStale         = errors.New("page saved since")
 )
 
 type Store struct {
@@ -49,22 +51,16 @@ type Owner struct {
 	TaskID    int64
 }
 
-// Page is a page outside the trash. ParentID is 0 at the top level, and FolderID is 0 until the
-// page has attachments.
+// Page is a page outside the trash. ParentID is 0 at the top level, FolderID is 0 until the page
+// has attachments, and UpdatedAt is when its title or body was last saved.
 type Page struct {
-	ID       int64
-	ParentID int64
-	Owner    Owner
-	Title    string
-	Body     string
-	FolderID int64
-}
-
-// Input is a page as saved. ParentID is 0 for the top level.
-type Input struct {
-	Title    string
-	ParentID int64
-	Body     string
+	ID        int64
+	ParentID  int64
+	Owner     Owner
+	Title     string
+	Body      string
+	FolderID  int64
+	UpdatedAt time.Time
 }
 
 // Crumb is one link of the path to a page.
@@ -173,13 +169,13 @@ func (s *Store) Page(ctx context.Context, id int64) (Page, error) {
 			UNION ALL
 			SELECT p.id, p.parent_id, p.trashed_at FROM pages p JOIN chain c ON p.id = c.parent_id
 		)
-		SELECT id, parent_id, project_id, task_id, title, body, folder_id FROM pages
+		SELECT id, parent_id, project_id, task_id, title, body, folder_id, updated_at FROM pages
 		WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM chain WHERE trashed_at IS NOT NULL)`
 	var (
 		p                             Page
 		parent, project, task, folder sql.Null[int64]
 	)
-	err := s.db.QueryRowContext(ctx, query, id).Scan(&p.ID, &parent, &project, &task, &p.Title, &p.Body, &folder)
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&p.ID, &parent, &project, &task, &p.Title, &p.Body, &folder, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Page{}, ErrNotFound
 	}
@@ -191,15 +187,25 @@ func (s *Store) Page(ctx context.Context, id int64) (Page, error) {
 	return p, nil
 }
 
-// Create adds a page of its own titled title at the top level and returns its id. It returns
-// ErrInvalidTitle when the title is blank.
-func (s *Store) Create(ctx context.Context, title string) (int64, error) {
+// Create adds a page of its own titled title under parent, or at the top level when parent is 0,
+// and returns its id. It returns ErrInvalidTitle when the title is blank and ErrInvalidParent when
+// parent is not a page outside the trash.
+func (s *Store) Create(ctx context.Context, parent int64, title string) (int64, error) {
 	title, err := CleanTitle(title)
 	if err != nil {
 		return 0, err
 	}
+	if parent != 0 {
+		ok, err := s.isVisibleOutside(ctx, parent, 0)
+		if err != nil {
+			return 0, err
+		}
+		if !ok {
+			return 0, fmt.Errorf("%w: %d", ErrInvalidParent, parent)
+		}
+	}
 	var id int64
-	if err := s.db.QueryRowContext(ctx, `INSERT INTO pages (title) VALUES ($1) RETURNING id`, title).Scan(&id); err != nil {
+	if err := s.db.QueryRowContext(ctx, `INSERT INTO pages (parent_id, title) VALUES ($1, $2) RETURNING id`, nullID(parent), title).Scan(&id); err != nil {
 		return 0, fmt.Errorf("insert page: %w", err)
 	}
 	return id, nil
@@ -225,87 +231,88 @@ func (s *Store) CreateOwned(ctx context.Context, tx *sql.Tx, owner Owner, title 
 	return id, nil
 }
 
-// Save stores in as page id. It attaches with attach the uploads that the body links to by name,
-// pointing those links at them, and discards the rest; it uses up uploads either way. Each [[Title]]
-// outside code in the body becomes a link to the subpage with that title, which Save creates when
-// there is none outside the trash. Files in the page's folder that the old body linked to and the
-// new one does not go to the trash, and the folder of a page of its own is renamed with the title.
-// It returns ErrInvalidTitle, ErrInvalidParent when the parent is the page itself, a page under it,
-// or not a page outside the trash, or when the page belongs to a project or task, ErrTitleTaken
-// when the page of another project has the title, the errors of attach, and ErrNotFound when there
-// is no such page.
-func (s *Store) Save(ctx context.Context, id int64, in Input, uploads []drive.Upload, attach func([]drive.Upload) ([]drive.File, error)) error {
-	cur, in, err := s.checkInput(ctx, id, in)
+// SaveContent stores title and body as page id if the page was last saved at version, and returns
+// the time of this save, its next version. Line breaks are stored as "\n", since forms send them as
+// "\r\n". The folder of a page of its own is renamed with the title. It returns ErrInvalidTitle, ErrStale when the page was saved since version, ErrTitleTaken
+// when the page of another project has the title, and ErrNotFound when there is no such page outside
+// the trash.
+func (s *Store) SaveContent(ctx context.Context, id int64, title, body string, version time.Time) (time.Time, error) {
+	title, err := CleanTitle(title)
 	if err != nil {
-		return errors.Join(err, s.drive.Discard(uploads))
+		return time.Time{}, err
 	}
-	in.Body, err = s.attachLinked(in.Body, uploads, attach)
-	if err != nil {
-		return err
-	}
-	if err := s.write(ctx, id, in); err != nil {
-		return err
-	}
-	if err := s.trashDropped(ctx, cur.FolderID, cur.Body, in.Body); err != nil {
-		return err
-	}
-	if cur.Owner == (Owner{}) && in.Title != cur.Title {
-		return s.renameFolder(ctx, cur, in.Title)
-	}
-	return nil
-}
-
-// checkInput cleans in for page id and returns the page as it was before the save.
-func (s *Store) checkInput(ctx context.Context, id int64, in Input) (Page, Input, error) {
-	title, err := CleanTitle(in.Title)
-	if err != nil {
-		return Page{}, Input{}, err
-	}
-	in.Title, in.Body = title, strings.TrimSpace(in.Body)
 	cur, err := s.Page(ctx, id)
 	if err != nil {
-		return Page{}, Input{}, err
+		return time.Time{}, err
 	}
-	if in.ParentID == 0 {
-		return cur, in, nil
-	}
-	if cur.Owner != (Owner{}) {
-		return Page{}, Input{}, fmt.Errorf("%w: the page of a project or task stays at the top", ErrInvalidParent)
-	}
-	ok, err := s.isVisibleOutside(ctx, in.ParentID, id)
+	body = strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n"))
+	saved, err := s.writeContent(ctx, id, title, body, version)
 	if err != nil {
-		return Page{}, Input{}, err
+		return time.Time{}, err
 	}
-	if !ok {
-		return Page{}, Input{}, fmt.Errorf("%w: %d", ErrInvalidParent, in.ParentID)
+	if cur.Owner == (Owner{}) && title != cur.Title {
+		if err := s.renameFolder(ctx, cur, title); err != nil {
+			return time.Time{}, err
+		}
 	}
-	return cur, in, nil
+	return saved, nil
 }
 
-// write stores in as page id in one transaction, with the subpages and links of its body.
-func (s *Store) write(ctx context.Context, id int64, in Input) error {
+// writeContent stores title and body as page id, if it was last saved at version, with the links of
+// the body in one transaction.
+func (s *Store) writeContent(ctx context.Context, id int64, title, body string, version time.Time) (time.Time, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin: %w", err)
+		return time.Time{}, fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
-	body, err := linkSubpages(ctx, tx, id, in.Body)
-	if err != nil {
-		return err
+	var saved time.Time
+	query := `
+		UPDATE pages SET title = $2, body = $3, updated_at = now()
+		WHERE id = $1 AND updated_at = $4 AND trashed_at IS NULL
+		RETURNING updated_at`
+	err = tx.QueryRowContext(ctx, query, id, title, body, version).Scan(&saved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, ErrStale
 	}
-	query := `UPDATE pages SET title = $2, parent_id = $3, body = $4, updated_at = now() WHERE id = $1`
-	_, err = tx.ExecContext(ctx, query, id, in.Title, nullID(in.ParentID), body)
 	if isPgError(err, uniqueViolation) {
-		return ErrTitleTaken
+		return time.Time{}, ErrTitleTaken
 	}
 	if err != nil {
-		return fmt.Errorf("update page: %w", err)
+		return time.Time{}, fmt.Errorf("update page: %w", err)
 	}
 	if err := writeLinks(ctx, tx, id, body); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return time.Time{}, fmt.Errorf("commit: %w", err)
+	}
+	return saved, nil
+}
+
+// Move puts page id, a page of its own, under parent, or at the top level when parent is 0, without
+// changing its version. It returns ErrInvalidParent when parent is id, a page under it, or not a
+// page outside the trash, or when id belongs to a project or task, and ErrNotFound when there is no
+// such page.
+func (s *Store) Move(ctx context.Context, id, parent int64) error {
+	p, err := s.Page(ctx, id)
+	if err != nil {
+		return err
+	}
+	if p.Owner != (Owner{}) {
+		return fmt.Errorf("%w: the page of a project or task stays at the top", ErrInvalidParent)
+	}
+	if parent != 0 {
+		ok, err := s.isVisibleOutside(ctx, parent, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%w: %d", ErrInvalidParent, parent)
+		}
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE pages SET parent_id = $2 WHERE id = $1`, id, nullID(parent)); err != nil {
+		return fmt.Errorf("move page: %w", err)
 	}
 	return nil
 }

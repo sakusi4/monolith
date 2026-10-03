@@ -17,6 +17,7 @@ go.work.sum
 /files_data/
 /bin/
 /tmp/
+/web/editor/node_modules/
 /server
 
 .DS_Store

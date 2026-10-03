@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sakusi4/monolith/internal/page"
 )
 
 func TestTasks(t *testing.T) {
@@ -89,6 +92,15 @@ func TestTasks(t *testing.T) {
 		}
 		return id, path
 	}
+	saveContent := func(t *testing.T, base, versionQuery, id, title, text string) *httptest.ResponseRecorder {
+		t.Helper()
+		var at time.Time
+		if err := s.db.QueryRowContext(t.Context(), versionQuery, id).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		form := url.Values{"title": {title}, "body": {text}, "version": {page.FormatVersion(at)}}
+		return s.post(t, base+"/content", form, session)
+	}
 	trashed := func(t *testing.T, folder string) bool {
 		t.Helper()
 		var yes bool
@@ -125,8 +137,10 @@ func TestTasks(t *testing.T) {
 
 	t.Run("a task saved as done leaves the open list and records when", func(t *testing.T) {
 		visa := taskID(t, "Visa")
-		done := url.Values{"title": {"Visa"}, "status": {"done"}, "due": {"2026-10-10"}, "body": {""}}
-		wantRedirect(t, send(t, "/task/tasks/"+visa+"/edit", done), "/task/tasks/"+visa)
+		fields := func(status string) url.Values {
+			return url.Values{"project": {""}, "status": {status}, "due": {"2026-10-10"}, "next": {"/task/tasks/" + visa}}
+		}
+		wantRedirect(t, s.post(t, "/task/tasks/"+visa+"/fields", fields("done"), session), "/task/tasks/"+visa)
 		if page := body(t, "/task/tasks"); strings.Contains(page, ">Visa</a>") {
 			t.Errorf("open list still shows the done task:\n%s", page)
 		}
@@ -147,14 +161,12 @@ func TestTasks(t *testing.T) {
 		if _, err := s.db.ExecContext(t.Context(), `UPDATE tasks SET completed_at = '2020-01-01' WHERE id = $1`, visa); err != nil {
 			t.Fatal(err)
 		}
-		again := url.Values{"title": {"Visa"}, "status": {"done"}, "due": {"2026-10-10"}, "body": {""}}
-		wantRedirect(t, send(t, "/task/tasks/"+visa+"/edit", again), "/task/tasks/"+visa)
+		wantRedirect(t, s.post(t, "/task/tasks/"+visa+"/fields", fields("done"), session), "/task/tasks/"+visa)
 		var year int
 		if err := s.db.QueryRowContext(t.Context(), `SELECT extract(year FROM completed_at) FROM tasks WHERE id = $1`, visa).Scan(&year); err != nil || year != 2020 {
 			t.Errorf("completed_at year after saving done again = %d, %v, want the first completion kept (2020)", year, err)
 		}
-		reopen := url.Values{"title": {"Visa"}, "status": {"todo"}, "due": {"2026-10-10"}, "body": {""}}
-		wantRedirect(t, send(t, "/task/tasks/"+visa+"/edit", reopen), "/task/tasks/"+visa)
+		wantRedirect(t, s.post(t, "/task/tasks/"+visa+"/fields", fields("todo"), session), "/task/tasks/"+visa)
 		if completed() {
 			t.Errorf("completed_at is still set after reopening")
 		}
@@ -174,11 +186,39 @@ func TestTasks(t *testing.T) {
 		if rec := s.post(t, "/task/projects/new", url.Values{"name": {"Heriot Watt"}}, session); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("second Heriot Watt project = %d, want 422", rec.Code)
 		}
-		edit := url.Values{"name": {"Heriot-Watt MSc"}, "status": {"active"}, "started": {"2026-09-01"}, "finished": {""}, "body": {""}}
-		wantRedirect(t, send(t, "/task/projects/"+heriot+"/edit", edit), "/task/projects/"+heriot)
-		var folder string
-		if err := s.db.QueryRowContext(t.Context(), `SELECT f.name FROM folders f JOIN pages pg ON pg.folder_id = f.id WHERE pg.project_id = $1`, heriot).Scan(&folder); err != nil || folder != "Heriot-Watt MSc" {
-			t.Errorf("project folder = %q, %v, want Heriot-Watt MSc", folder, err)
+		var old time.Time
+		if err := s.db.QueryRowContext(t.Context(), `SELECT updated_at FROM pages WHERE project_id = $1`, heriot).Scan(&old); err != nil {
+			t.Fatal(err)
+		}
+		if rec := saveContent(t, "/task/projects/"+heriot, `SELECT updated_at FROM pages WHERE project_id = $1`, heriot, "Heriot-Watt MSc", ""); rec.Code != http.StatusNoContent {
+			t.Fatalf("project rename = %d, want 204", rec.Code)
+		}
+		folderName := func() string {
+			t.Helper()
+			var folder string
+			if err := s.db.QueryRowContext(t.Context(), `SELECT f.name FROM folders f JOIN pages pg ON pg.folder_id = f.id WHERE pg.project_id = $1`, heriot).Scan(&folder); err != nil {
+				t.Fatal(err)
+			}
+			return folder
+		}
+		if folder := folderName(); folder != "Heriot-Watt MSc" {
+			t.Errorf("project folder = %q, want Heriot-Watt MSc", folder)
+		}
+		stale := url.Values{"title": {"Stale name"}, "body": {""}, "version": {page.FormatVersion(old)}}
+		if rec := s.post(t, "/task/projects/"+heriot+"/content", stale, session); rec.Code != http.StatusConflict {
+			t.Errorf("project save with an old version = %d, want 409", rec.Code)
+		}
+		if folder := folderName(); folder != "Heriot-Watt MSc" || projectID(t, "Heriot-Watt MSc") != heriot {
+			t.Errorf("a stale project save changed the folder to %q or the name", folder)
+		}
+		if rec := saveContent(t, "/task/projects/"+heriot, `SELECT updated_at FROM pages WHERE project_id = $1`, heriot, "tunnel", ""); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("renaming a project to another project's name = %d, want 422", rec.Code)
+		}
+		fields := url.Values{"status": {"paused"}, "started": {"2026-09-01"}, "finished": {""}}
+		wantRedirect(t, s.post(t, "/task/projects/"+heriot+"/fields", fields, session), "/task/projects/"+heriot)
+		var status string
+		if err := s.db.QueryRowContext(t.Context(), `SELECT status || ' ' || started_on::text FROM projects WHERE id = $1`, heriot).Scan(&status); err != nil || status != "paused 2026-09-01" {
+			t.Errorf("project after its fields changed = %q, %v, want paused 2026-09-01", status, err)
 		}
 	})
 
@@ -195,36 +235,31 @@ func TestTasks(t *testing.T) {
 		}
 	})
 
-	t.Run("a task's body renders as markdown", func(t *testing.T) {
+	t.Run("a task's title and body autosave", func(t *testing.T) {
 		heriot := projectID(t, "Heriot-Watt MSc")
-		addTask(t, "Enrol", heriot, "")
-		enrol := taskID(t, "Enrol")
-		edit := url.Values{"title": {"Enrol"}, "project": {heriot}, "status": {"todo"}, "due": {""}, "body": {"# Steps\n- [x] passport"}}
-		wantRedirect(t, send(t, "/task/tasks/"+enrol+"/edit", edit), "/task/tasks/"+enrol)
-		if page := body(t, "/task/tasks/"+enrol); !strings.Contains(page, "<h2>Steps</h2>") || !strings.Contains(page, `type="checkbox"`) {
-			t.Errorf("task page does not render the body:\n%s", page)
+		addTask(t, "Enrl", heriot, "")
+		enrol := taskID(t, "Enrl")
+		if rec := saveContent(t, "/task/tasks/"+enrol, `SELECT updated_at FROM pages WHERE task_id = $1`, enrol, "Enrol", "# Steps"); rec.Code != http.StatusNoContent {
+			t.Fatalf("task autosave = %d, want 204", rec.Code)
+		}
+		if page := body(t, "/task/tasks/"+enrol); !strings.Contains(page, "# Steps") || !strings.Contains(page, `value="Enrol"`) {
+			t.Errorf("task page does not show the saved title and body:\n%s", page)
 		}
 	})
 
 	t.Run("attachments go to the task's own folder", func(t *testing.T) {
 		enrol, laundry, architecture := taskID(t, "Enrol"), taskID(t, "Laundry"), taskID(t, "Architecture")
-		wantRedirect(t, send(t, "/task/tasks/"+enrol+"/files", nil, [2]string{"offer.pdf", "%PDF"}), "/task/tasks/"+enrol+"/edit")
+		wantRedirect(t, send(t, "/task/tasks/"+enrol+"/files", nil, [2]string{"offer.pdf", "%PDF"}), "/task/tasks/"+enrol)
 		if _, path := folderOf(t, enrol); !slices.Equal(path, []string{"Projects", "Heriot-Watt MSc", "Tasks", "Enrol"}) {
 			t.Errorf("task folder = %v, want Projects/Heriot-Watt MSc/Tasks/Enrol", path)
 		}
 		if page := body(t, "/task/tasks/"+enrol); !strings.Contains(page, "offer.pdf") {
 			t.Errorf("task page does not list the attachment:\n%s", page)
 		}
-		offer := idOf(t, `SELECT id FROM files WHERE name = $1`, "offer.pdf")
-		save := url.Values{"title": {"Laundry"}, "status": {"todo"}, "due": {""}, "body": {"Before ![shot.png](shot.png) after [offer.pdf](/drive/files/" + offer + "/content)"}}
-		wantRedirect(t, send(t, "/task/tasks/"+laundry+"/edit", save, [2]string{"shot.png", "png"}, [2]string{"removed.png", "png"}), "/task/tasks/"+laundry)
+		rec := send(t, "/task/tasks/"+laundry+"/images", nil, [2]string{"shot.png", "png"})
 		shot := idOf(t, `SELECT id FROM files WHERE name = $1`, "shot.png")
-		if page := body(t, "/task/tasks/"+laundry); !strings.Contains(page, `src="/drive/files/`+shot+`/content"`) {
-			t.Errorf("task page does not show the saved image from its own file:\n%s", page)
-		}
-		var n int
-		if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM files WHERE name = 'removed.png'`).Scan(&n); err != nil || n != 0 {
-			t.Errorf("files named removed.png = %d, %v, want 0 for an upload the body does not link", n, err)
+		if rec.Code != http.StatusCreated || rec.Header().Get("Location") != "/drive/files/"+shot {
+			t.Errorf("image upload = %d to %q, want 201 to /drive/files/%s", rec.Code, rec.Header().Get("Location"), shot)
 		}
 		if _, path := folderOf(t, laundry); !slices.Equal(path, []string{"Inbox", "Laundry"}) {
 			t.Errorf("inbox task folder = %v, want Inbox/Laundry", path)
@@ -234,25 +269,15 @@ func TestTasks(t *testing.T) {
 		}
 	})
 
-	t.Run("a saved body moves its own files it no longer links to the trash", func(t *testing.T) {
-		laundry := taskID(t, "Laundry")
-		shot := idOf(t, `SELECT id FROM files WHERE name = $1`, "shot.png")
-		offer := idOf(t, `SELECT id FROM files WHERE name = $1`, "offer.pdf")
-		save := url.Values{"title": {"Laundry"}, "status": {"todo"}, "due": {""}, "body": {"Now ![other.png](other.png)"}}
-		wantRedirect(t, send(t, "/task/tasks/"+laundry+"/edit", save, [2]string{"other.png", "png"}), "/task/tasks/"+laundry)
-		fileTrashed := func(id string) bool {
-			t.Helper()
-			var yes bool
-			if err := s.db.QueryRowContext(t.Context(), `SELECT trashed_at IS NOT NULL FROM files WHERE id = $1`, id).Scan(&yes); err != nil {
-				t.Fatal(err)
+	t.Run("renaming a task with a folder renames the folder", func(t *testing.T) {
+		enrol := taskID(t, "Enrol")
+		for _, title := range []string{"Enrolment", "Enrol"} {
+			if rec := saveContent(t, "/task/tasks/"+enrol, `SELECT updated_at FROM pages WHERE task_id = $1`, enrol, title, ""); rec.Code != http.StatusNoContent {
+				t.Fatalf("task rename to %s = %d, want 204", title, rec.Code)
 			}
-			return yes
-		}
-		if !fileTrashed(shot) {
-			t.Errorf("shot.png, dropped from the body, is not in the trash")
-		}
-		if fileTrashed(offer) {
-			t.Errorf("offer.pdf, another task's file dropped from the body, is in the trash")
+			if _, path := folderOf(t, enrol); !slices.Equal(path, []string{"Projects", "Heriot-Watt MSc", "Tasks", title}) {
+				t.Errorf("task folder after renaming to %s = %v", title, path)
+			}
 		}
 	})
 
@@ -262,12 +287,8 @@ func TestTasks(t *testing.T) {
 		move := func(t *testing.T, title, project string) *httptest.ResponseRecorder {
 			t.Helper()
 			id := taskID(t, title)
-			var text string
-			if err := s.db.QueryRowContext(t.Context(), `SELECT body FROM pages WHERE task_id = $1`, id).Scan(&text); err != nil {
-				t.Fatal(err)
-			}
-			edit := url.Values{"title": {title}, "project": {project}, "status": {"todo"}, "due": {""}, "body": {text}}
-			return send(t, "/task/tasks/"+id+"/edit", edit)
+			fields := url.Values{"project": {project}, "status": {"todo"}, "due": {""}, "next": {"/task/tasks/" + id}}
+			return s.post(t, "/task/tasks/"+id+"/fields", fields, session)
 		}
 		wantRedirect(t, move(t, "Laundry", heriot), "/task/tasks/"+taskID(t, "Laundry"))
 		if _, path := folderOf(t, taskID(t, "Laundry")); !slices.Equal(path, []string{"Projects", "Heriot-Watt MSc", "Tasks", "Laundry"}) {
@@ -287,16 +308,8 @@ func TestTasks(t *testing.T) {
 
 	t.Run("status, project, and due change right from the list", func(t *testing.T) {
 		visa := taskID(t, "Visa")
-		text := "if [[ -f x ]]; then echo; fi"
-		if _, err := s.db.ExecContext(t.Context(), `UPDATE pages SET body = $2 WHERE task_id = $1`, visa, text); err != nil {
-			t.Fatal(err)
-		}
 		fields := url.Values{"project": {""}, "status": {"in_progress"}, "due": {"2026-10-20"}, "next": {"/task/tasks?status=all"}}
 		wantRedirect(t, s.post(t, "/task/tasks/"+visa+"/fields", fields, session), "/task/tasks?status=all")
-		var saved string
-		if err := s.db.QueryRowContext(t.Context(), `SELECT body FROM pages WHERE task_id = $1`, visa).Scan(&saved); err != nil || saved != text {
-			t.Errorf("body after a change from the list = %q, %v, want it untouched: %q", saved, err, text)
-		}
 		var got string
 		if err := s.db.QueryRowContext(t.Context(), `SELECT coalesce(project_id::text, 'inbox') || ' ' || status || ' ' || due_on::text FROM tasks WHERE id = $1`, visa).Scan(&got); err != nil || got != "inbox in_progress 2026-10-20" {
 			t.Errorf("Visa after a change from the list = %q, %v, want inbox in_progress 2026-10-20", got, err)
@@ -308,13 +321,14 @@ func TestTasks(t *testing.T) {
 		}
 	})
 
-	t.Run("[[Title]] in a project body makes a subpage under the project", func(t *testing.T) {
+	t.Run("a subpage made on a project page leads back to it", func(t *testing.T) {
 		heriot := projectID(t, "Heriot-Watt MSc")
-		edit := url.Values{"name": {"Heriot-Watt MSc"}, "status": {"active"}, "started": {"2026-09-01"}, "finished": {""}, "body": {"Read [[Reading list]] first."}}
-		wantRedirect(t, send(t, "/task/projects/"+heriot+"/edit", edit), "/task/projects/"+heriot)
+		heriotPage := idOf(t, `SELECT id FROM pages WHERE project_id = $1`, heriot)
+		rec := s.post(t, "/page/pages/new", url.Values{"title": {"Reading list"}, "parent": {heriotPage}}, session)
 		list := idOf(t, `SELECT id FROM pages WHERE title = $1`, "Reading list")
+		wantRedirect(t, rec, "/page/pages/"+list)
 		if page := body(t, "/task/projects/"+heriot); !strings.Contains(page, `href="/page/pages/`+list+`"`) {
-			t.Errorf("project page does not link its subpage:\n%s", page)
+			t.Errorf("project page does not list its subpage:\n%s", page)
 		}
 		if page := body(t, "/page/pages/"+list); !strings.Contains(page, `<a href="/task/projects/`+heriot+`">Heriot-Watt MSc</a>`) {
 			t.Errorf("the subpage's path does not lead to the project:\n%s", page)

@@ -45,6 +45,7 @@ internal/auth/       로그인, 세션, 인증 미들웨어
 internal/postgres/   연결과 마이그레이션. 도메인 쿼리는 두지 않는다.
 internal/money/      금액 파싱과 표시. 순수 함수만.
 web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기능이 같이 쓴다.
+web/editor/          본문 편집기(Milkdown Crepe) 빌드. Node와 esbuild로 web/static/editor-<버전>.js, .css를 만든다.
 ```
 
 `go.mod`의 `go` 지시어는 1.25 이상이다(`http.CrossOriginProtection`, `testing/synctest`).
@@ -76,9 +77,9 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 2. 핸들러는 `http.Handler` 또는 `http.HandlerFunc`, 미들웨어는 `func(http.Handler) http.Handler`다. 프레임워크식 context 타입을 만들지 않는다.
 3. 기능 패키지는 `NewHandler(...) http.Handler` 하나를 export하고, 그 함수 안에서 자기 라우트를 모두 등록한다. 핸들러는 의존성을 필드로 가진 unexported `handler` 타입의 메서드다(Miniflux `api.NewHandler`).
 4. 경로는 `/{패키지명}/`으로 시작한다. 패키지명이 곧 마운트 prefix다: `/finance/`, `/task/`, `/auth/`.
-5. 화면은 서버에서 HTML로 그린다(3.6). JSON API를 만들지 않는다. 앱 밖의 클라이언트가 필요해지면 먼저 묻는다.
+5. 화면은 서버에서 HTML로 그린다(3.6). JSON API를 만들지 않는다. 앱 밖의 클라이언트가 필요해지면 먼저 묻는다. 편집기가 읽는 `GET /page/links`도 HTML이다.
 6. 폼은 HTML `<form>`의 GET과 POST만 쓴다. 화면과 그 제출은 같은 URL이다: `GET /finance/assets/new`가 폼을 보여 주고 `POST /finance/assets/new`가 저장한다. 수정은 `/{id}/edit`, 삭제는 `POST /{id}/delete`다.
-7. POST가 성공하면 `303 See Other`로 GET 화면(목록 등)에 보낸다(Post/Redirect/Get). 성공한 POST 응답에 HTML을 바로 그리지 않는다.
+7. POST가 성공하면 `303 See Other`로 GET 화면(목록 등)에 보낸다(Post/Redirect/Get). 성공한 POST 응답에 HTML을 바로 그리지 않는다. 예외: 편집기의 자동 저장(`…/content`)은 204(새 버전은 `Page-Version` 헤더, 그새 바뀌었으면 409), 편집기의 업로드(`…/images`)는 201과 `Location`으로 답한다.
 8. 폼 값은 `r.PostFormValue`로 읽고, 경계에서 한 번 파싱해 도메인 타입으로 바꾼다(2.3). 금액은 `money.Parse`로 바꾼다.
 9. 입력 검증은 입력 struct의 규칙 메서드(`AssetInput.Clean()`)가 하고, `Store`가 쓰기 전에 호출한다. 그래서 어느 경로로 들어와도 규칙을 거친다. 검증에 실패하면 422로 입력값과 영어 에러 문구를 담아 폼을 다시 그린다.
 10. 없는 리소스는 `http.NotFound`로 404다. 500은 `web.ServerError`로만 준다. 원인은 로그에만 남기고 화면에는 고정 문구를 보인다.
@@ -113,7 +114,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 3. 목록의 필터와 정렬은 URL 쿼리로 받는 GET 폼이다. 정렬은 `order`와 `direction`(Miniflux와 같다), 필터는 필드 이름을 파라미터로 쓴다. 값은 `web.ParseChoice`로 고정 목록에서 파싱하고, 비어 있으면 기본값, 목록 밖이면 400이다. 필터 막대는 `web.FilterBar`로 만들어 `{{template "filters" ...}}`로 그린다. 필터와 정렬 규칙은 기능 패키지의 `{목록}Query` 타입이 갖고 단위 테스트한다.
 4. 템플릿에는 표시만 둔다. 계산과 분기는 Go에서 끝내고 결과를 넘긴다. 금액은 템플릿 함수 `money`로, 종류 이름은 타입의 메서드(`.Type.Label`)로 표시한다.
 5. 스타일은 직접 쓴 `web/static/app.css` 하나다. CSS 프레임워크를 쓰지 않는다. 글자 크기, 간격, 컨트롤 높이, 색은 `:root`의 변수에서만 정하고 규칙에서는 변수를 쓴다. 라이트와 다크는 `prefers-color-scheme`으로 변수만 바꾼다. 요소는 시맨틱 태그로 고르고, 클래스는 태그로 구분할 수 없는 곳(`.primary`, `.button`, `.danger`, `.num`, `.actions`)에만 쓴다. 인라인 `style`을 쓰지 않는다.
-6. JavaScript 프레임워크와 Node 빌드를 쓰지 않는다. 삭제 확인 같은 한 줄은 인라인 속성(`onsubmit="return confirm(...)"`)으로 쓴다. 페이지 일부만 바꾸는 화면(목록에서 바로 추가·수정)은 htmx(`web/static/htmx-2.0.11.min.js`)를 그 화면의 `head` 블록에서 불러 쓴다. `layout.html`의 `<main>`에는 바꿔 끼우는 방식(`hx-target`, `hx-select`, `hx-swap`)만 있고, `hx-boost`는 같은 화면을 다시 그리는 요소(필터 폼, 표, 추가 폼)에만 건다. 다른 화면으로 가는 링크는 boost하지 않는다. 그러면 다른 화면은 항상 전체 페이지로 열려 그 화면의 스크립트가 순서대로 실행된다. 서버는 항상 전체 페이지를 그리고(성공은 303, 검증 실패는 422) JS 없이도 같은 URL로 동작한다. 행 수정은 `GET /{id}/edit`이 그 행만 입력칸으로 바꾼 목록을 그린다. 몇 개 필드만 목록에서 고치는 화면(할 일)은 행마다 입력칸을 늘 두고, 값이 바뀌면 `POST /{id}/fields`로 저장해 목록을 다시 그린다(선택칸은 `change`, 날짜칸은 칸을 벗어날 때 `blur changed`). 행의 입력칸은 `form` 속성으로 행의 폼에 묶고, JS가 없을 때 쓰도록 폼에 `<noscript>` Save 버튼을 둔다. 차트는 Chart.js를 쓰고 차트가 있는 화면에만 붙인다. 파일은 버전을 이름에 넣어 `web/static/`에 둔다(`chart-4.5.1.umd.min.js`). 데이터는 Go가 `<script type="application/json">`에 넣고, 화면별 스크립트(`web/static/net_worth_chart.js`)가 읽어 그린다.
+6. JavaScript 프레임워크를 쓰지 않는다. Node 빌드는 본문 편집기에만 쓴다(이 항목 끝). 삭제 확인 같은 한 줄은 인라인 속성(`onsubmit="return confirm(...)"`)으로 쓴다. 페이지 일부만 바꾸는 화면(목록에서 바로 추가·수정)은 htmx(`web/static/htmx-2.0.11.min.js`)를 그 화면의 `head` 블록에서 불러 쓴다. `layout.html`의 `<main>`에는 바꿔 끼우는 방식(`hx-target`, `hx-select`, `hx-swap`)만 있고, `hx-boost`는 같은 화면을 다시 그리는 요소(필터 폼, 표, 추가 폼)에만 건다. 다른 화면으로 가는 링크는 boost하지 않는다. 그러면 다른 화면은 항상 전체 페이지로 열려 그 화면의 스크립트가 순서대로 실행된다. 서버는 항상 전체 페이지를 그리고(성공은 303, 검증 실패는 422) JS 없이도 같은 URL로 동작한다. 행 수정은 `GET /{id}/edit`이 그 행만 입력칸으로 바꾼 목록을 그린다. 몇 개 필드만 목록에서 고치는 화면(할 일)은 행마다 입력칸을 늘 두고, 값이 바뀌면 `POST /{id}/fields`로 저장해 목록을 다시 그린다(선택칸은 `change`, 날짜칸은 칸을 벗어날 때 `blur changed`). 행의 입력칸은 `form` 속성으로 행의 폼에 묶고, JS가 없을 때 쓰도록 폼에 `<noscript>` Save 버튼을 둔다. 차트는 Chart.js를 쓰고 차트가 있는 화면에만 붙인다. 파일은 버전을 이름에 넣어 `web/static/`에 둔다(`chart-4.5.1.umd.min.js`). 데이터는 Go가 `<script type="application/json">`에 넣고, 화면별 스크립트(`web/static/net_worth_chart.js`)가 읽어 그린다. 본문 편집(페이지, 프로젝트, 할 일)은 Milkdown Crepe 편집기로 하고 자동 저장하며, 이 편집에는 JS가 필요하다. 편집기는 `web/editor/`에서 Node와 esbuild로 빌드하고(`make editor`) 결과(`web/static/editor-<버전>.js`, `.css`)를 커밋한다. Node는 이 빌드에만 쓰고 Go 빌드, 테스트, 실행에는 필요 없다. 편집기 버전을 올리면 마크다운 왕복 검사를 다시 한다(`docs/superpowers/specs/2026-10-03-page-editor-design.md`).
 7. 화면 문구는 영어로 템플릿과 핸들러에 바로 쓴다. 한국어를 쓰지 않는다. i18n을 쓰지 않는다.
 8. 클릭할 수 있는 것은 `<a>`나 `<button>`이다. 입력마다 `<label>`이 있다. 목록의 행마다 반복되는 버튼에는 대상 이름을 담은 `aria-label`을 단다. 페이지마다 `h1`은 하나다.
 
@@ -197,7 +198,7 @@ web/                 HTML 템플릿, 정적 파일(CSS), 렌더링. 모든 기�
 5. 요청받지 않은 기능, 옵션, 엔드포인트, 쿼리 파라미터를 추가하지 않는다.
 6. 요청받지 않은 추상화를 만들지 않는다. 구현체가 하나뿐인 인터페이스, 한 곳에서만 쓰는 헬퍼, 한 곳에서만 쓰는 제네릭, functional options, 빌더, 범용 CRUD 베이스를 만들지 않는다.
 7. struct embedding으로 상속(기반 클래스, 추상 클래스)을 흉내 내지 않는다. 재사용은 필드로 가진 값에 위임한다.
-8. 새 의존성은 먼저 물어본다. 허락 없이 `go get` 하지 않는다. 이 문서가 이름으로 정한 의존성(`pgx`, `x/crypto`)과 개발 도구 air(`make dev`, `go run`으로 버전 고정)만 예외다.
+8. 새 의존성은 먼저 물어본다. 허락 없이 `go get` 하지 않는다. 이 문서가 이름으로 정한 의존성(`pgx`, `x/crypto`)과 개발 도구 air(`make dev`, `go run`으로 버전 고정), 편집기의 npm 의존성(`@milkdown/crepe`, `@milkdown/kit`, `unist-util-visit`, `esbuild`, `web/editor/package.json`에 버전 고정)만 예외다.
 9. 새 파일을 만들기 전에 같은 패키지의 기존 파일을 먼저 읽고 그 구조와 스타일을 따른다.
 10. 기존 코드를 수정할 때 요청 범위 밖의 코드를 건드리지 않는다. 리팩토링은 별도 요청이 있을 때만 한다.
 11. 매직 넘버, 매직 스트링을 쓰지 않는다. named `const`로 뺀다. 시간은 `30 * time.Second`처럼 `time.Duration`으로 쓴다.

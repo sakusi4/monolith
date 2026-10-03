@@ -12,7 +12,7 @@ func TestTaskInput_Clean(t *testing.T) {
 		want    TaskInput
 		wantErr error
 	}{
-		{"title and body are trimmed", TaskInput{Title: " Visa ", Status: StatusTodo, Body: " renew \n"}, TaskInput{Title: "Visa", Status: StatusTodo, Body: "renew"}, nil},
+		{"the title is trimmed", TaskInput{Title: " Visa ", Status: StatusTodo}, TaskInput{Title: "Visa", Status: StatusTodo}, nil},
 		{"blank title", TaskInput{Title: "  ", Status: StatusTodo}, TaskInput{}, ErrInvalidTask},
 		{"unknown status", TaskInput{Title: "Visa", Status: "later"}, TaskInput{}, ErrInvalidTask},
 	}

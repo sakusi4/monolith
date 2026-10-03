@@ -1,25 +1,51 @@
 {{define "title"}}{{.Task.Title}}{{end}}
+{{define "head"}}
+<meta name="htmx-config" content='{"scrollIntoViewOnBoost":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+<script src="/static/htmx-2.0.11.min.js" defer></script>
+{{template "editor-head"}}
+{{end}}
 {{define "content"}}
 <header>
   <nav aria-label="Breadcrumb"><a href="/task/tasks">Tasks</a>{{with .ProjectURL}} / <a href="{{.}}">{{$.Task.ProjectName}}</a>{{end}}</nav>
-  <h1>{{.Task.Title}}</h1>
+  {{template "editor-title" .Editor}}
   <div class="actions">
-    <a class="button" href="{{.EditURL}}">Edit</a>
     <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this task? Its page moves to the page trash.')">
       <input type="hidden" name="next" value="/task/tasks">
       <button type="submit" class="danger">Delete</button>
     </form>
   </div>
-  <dl>
-    <div><dt>Project</dt><dd>{{with .ProjectURL}}<a href="{{.}}">{{$.Task.ProjectName}}</a>{{else}}Inbox{{end}}</dd></div>
-    <div><dt>Status</dt><dd>{{.Task.Status.Label}}</dd></div>
-    {{with .Due}}<div><dt>Due</dt><dd>{{.}}</dd></div>{{end}}
-    {{with .Completed}}<div><dt>Completed</dt><dd>{{.}}</dd></div>{{end}}
-  </dl>
 </header>
-<article aria-label="Details">
-  {{with .Task.Body}}{{markdown .}}{{else}}<p>No details.</p>{{end}}
-</article>
+<form id="task-fields" method="post" action="{{.FieldsURL}}" hx-target="#task-fields" hx-select="#task-fields" hx-swap="outerHTML">
+  <input type="hidden" name="next" value="{{.URL}}">
+  <fieldset>
+    <label>Project
+      <select hx-post="{{$.FieldsURL}}" name="project">
+        <option value="">Inbox</option>
+        {{range .Projects}}<option value="{{.ID}}"{{if eq .ID $.Task.ProjectID}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <label>Status
+      <select hx-post="{{$.FieldsURL}}" name="status">
+        {{range .Statuses}}<option value="{{.}}"{{if eq . $.Task.Status}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <label>Due
+      <input type="date" hx-post="{{$.FieldsURL}}" hx-trigger="blur changed" name="due" value="{{.Due}}">
+    </label>
+    {{with .Completed}}<p>Completed {{.}}</p>{{end}}
+    <noscript><button type="submit">Save</button></noscript>
+  </fieldset>
+  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
+</form>
+{{template "editor" .Editor}}
 {{template "page-links" .Links}}
+<form method="post" action="{{.FilesURL}}" enctype="multipart/form-data">
+  <fieldset>
+    <label>Attach files
+      <input type="file" name="files" multiple required>
+    </label>
+    <button type="submit">Attach</button>
+  </fieldset>
+</form>
 {{template "attachments" .Attachments}}
 {{end}}

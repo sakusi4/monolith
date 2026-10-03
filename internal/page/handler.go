@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sakusi4/monolith/internal/drive"
@@ -14,6 +15,7 @@ import (
 const (
 	trashURL             = "/page/trash"
 	dateLayout           = "Jan 2, 2006"
+	maxLinks             = 10
 	titleProblem         = "Enter a title."
 	parentProblem        = "Pick a parent that is not this page or one of its subpages."
 	parentTrashedProblem = "The parent page is in the trash."
@@ -34,11 +36,13 @@ func NewHandler(store *Store, loc *time.Location, maxUpload int64) http.Handler 
 	h := &handler{store: store, loc: loc, maxUpload: maxUpload}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /page", h.listPages)
+	mux.HandleFunc("GET /page/links", h.listLinks)
 	mux.HandleFunc("POST /page/pages/new", h.createPage)
 	mux.HandleFunc("GET /page/pages/{id}", h.showPage)
-	mux.HandleFunc("GET /page/pages/{id}/edit", h.editPage)
-	mux.HandleFunc("POST /page/pages/{id}/edit", h.updatePage)
+	mux.HandleFunc("POST /page/pages/{id}/content", h.saveContent)
+	mux.HandleFunc("POST /page/pages/{id}/images", h.uploadImages)
 	mux.HandleFunc("POST /page/pages/{id}/files", h.attachFiles)
+	mux.HandleFunc("POST /page/pages/{id}/move", h.movePage)
 	mux.HandleFunc("POST /page/pages/{id}/delete", h.trashPage)
 	mux.HandleFunc("GET /page/trash", h.showTrash)
 	mux.HandleFunc("POST /page/trash/{id}/restore", h.restorePage)
@@ -58,30 +62,14 @@ type listView struct {
 type detailView struct {
 	Page        Page
 	Crumbs      []Crumb
+	Editor      Editor
 	Links       Links
-	Attachments drive.Attachments
-	EditURL     string
-	DeleteURL   string
-}
-
-type editView struct {
-	Page        Page
-	Crumbs      []Crumb
-	Form        pageForm
 	Parents     []Entry
 	Attachments drive.Attachments
 	Error       string
-	URL         string
+	MoveURL     string
 	FilesURL    string
-	CancelURL   string
-}
-
-// pageForm holds the edit form's values as the user typed them.
-type pageForm struct {
-	Title     string
-	ParentID  int64
-	Body      string
-	Submitted bool
+	DeleteURL   string
 }
 
 type trashView struct {
@@ -122,12 +110,30 @@ func (h *handler) renderList(w http.ResponseWriter, r *http.Request, status int,
 	web.Render(w, r, status, "page_list", view)
 }
 
+// listLinks shows the pages that the editor's picker offers for the query value q: the matches, or
+// the latest changed pages when q is empty.
+func (h *handler) listLinks(w http.ResponseWriter, r *http.Request) {
+	entries, err := h.store.Search(r.Context(), strings.TrimSpace(r.URL.Query().Get("q")))
+	if err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	web.Render(w, r, http.StatusOK, "page_links", entries[:min(len(entries), maxLinks)])
+}
+
 func (h *handler) createPage(w http.ResponseWriter, r *http.Request) {
 	title := r.PostFormValue("title")
-	id, err := h.store.Create(r.Context(), title)
+	parent, ok := parseID(r.PostFormValue("parent"))
+	if !ok {
+		http.Error(w, "Invalid parent.", http.StatusBadRequest)
+		return
+	}
+	id, err := h.store.Create(r.Context(), parent, title)
 	switch {
 	case errors.Is(err, ErrInvalidTitle):
 		h.renderList(w, r, http.StatusUnprocessableEntity, title, titleProblem)
+	case errors.Is(err, ErrInvalidParent):
+		h.renderList(w, r, http.StatusUnprocessableEntity, title, parentTrashedProblem)
 	case err != nil:
 		web.ServerError(w, r, err)
 	default:
@@ -144,6 +150,11 @@ func (h *handler) showPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, entryURL(p.ID, p.Owner), http.StatusSeeOther)
 		return
 	}
+	h.renderPage(w, r, http.StatusOK, p, "")
+}
+
+// renderPage shows p, a page of its own, with problem from a move or an attachment that failed.
+func (h *handler) renderPage(w http.ResponseWriter, r *http.Request, status int, p Page, problem string) {
 	ctx := r.Context()
 	crumbs, err := h.store.Crumbs(ctx, p)
 	if err != nil {
@@ -151,32 +162,6 @@ func (h *handler) showPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	links, err := h.store.Links(ctx, p.ID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	sec, err := h.store.drive.Attachments(ctx, p.FolderID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	u := PageURL(p.ID)
-	view := detailView{Page: p, Crumbs: crumbs, Links: links, Attachments: sec, EditURL: u + "/edit", DeleteURL: u + "/delete"}
-	web.Render(w, r, http.StatusOK, "page_detail", view)
-}
-
-func (h *handler) editPage(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.loadOwnPage(w, r)
-	if !ok {
-		return
-	}
-	h.renderEdit(w, r, http.StatusOK, p, pageForm{}, "")
-}
-
-// renderEdit shows the edit screen of p with form, or with the page's values when form is not submitted.
-func (h *handler) renderEdit(w http.ResponseWriter, r *http.Request, status int, p Page, form pageForm, problem string) {
-	ctx := r.Context()
-	crumbs, err := h.store.Crumbs(ctx, p)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
@@ -191,57 +176,51 @@ func (h *handler) renderEdit(w http.ResponseWriter, r *http.Request, status int,
 		web.ServerError(w, r, err)
 		return
 	}
-	if !form.Submitted {
-		form = pageForm{Title: p.Title, ParentID: p.ParentID, Body: p.Body}
-	}
 	u := PageURL(p.ID)
-	view := editView{
+	view := detailView{
 		Page:        p,
 		Crumbs:      crumbs,
-		Form:        form,
+		Editor:      Editor{PageID: p.ID, Title: p.Title, Body: p.Body, Version: FormatVersion(p.UpdatedAt), ContentURL: u + "/content", ImagesURL: u + "/images"},
+		Links:       links,
 		Parents:     parents,
 		Attachments: sec,
 		Error:       problem,
-		URL:         u + "/edit",
+		MoveURL:     u + "/move",
 		FilesURL:    u + "/files",
-		CancelURL:   u,
+		DeleteURL:   u + "/delete",
 	}
-	web.Render(w, r, status, "page_edit", view)
+	web.Render(w, r, status, "page_detail", view)
 }
 
-func (h *handler) updatePage(w http.ResponseWriter, r *http.Request) {
+func (h *handler) saveContent(w http.ResponseWriter, r *http.Request) {
 	p, ok := h.loadOwnPage(w, r)
 	if !ok {
 		return
 	}
-	fields, uploads, ok := h.receive(w, r)
-	if !ok {
-		return
-	}
-	form := pageForm{Title: fields.Get("title"), Body: fields.Get("body"), Submitted: true}
-	parent, ok := parseID(fields.Get("parent"))
-	if !ok {
-		if err := h.store.drive.Discard(uploads); err != nil {
-			web.ServerError(w, r, err)
-			return
-		}
-		http.Error(w, "Invalid parent.", http.StatusBadRequest)
-		return
-	}
-	form.ParentID = parent
-	ctx := r.Context()
-	err := h.store.Save(ctx, p.ID, Input{Title: form.Title, ParentID: parent, Body: form.Body}, uploads, func(used []drive.Upload) ([]drive.File, error) {
-		return h.store.Attach(ctx, p.ID, used)
-	})
-	if problem := saveProblem(err); problem != "" {
-		h.renderEdit(w, r, http.StatusUnprocessableEntity, p, form, problem)
-		return
-	}
+	version, err := ParseVersion(r.PostFormValue("version"))
 	if err != nil {
-		respondError(w, r, err)
+		http.Error(w, "Invalid version.", http.StatusBadRequest)
 		return
 	}
-	http.Redirect(w, r, PageURL(p.ID), http.StatusSeeOther)
+	saved, err := h.store.SaveContent(r.Context(), p.ID, r.PostFormValue("title"), r.PostFormValue("body"), version)
+	problem := ""
+	if errors.Is(err, ErrInvalidTitle) {
+		problem = titleProblem
+	}
+	RespondSaved(w, r, saved, err, problem)
+}
+
+func (h *handler) uploadImages(w http.ResponseWriter, r *http.Request) {
+	p, ok := h.loadOwnPage(w, r)
+	if !ok {
+		return
+	}
+	_, uploads, ok := h.receive(w, r)
+	if !ok {
+		return
+	}
+	files, err := h.store.Attach(r.Context(), p.ID, uploads)
+	RespondUploaded(w, r, files, err, uploadProblem(err))
 }
 
 func (h *handler) attachFiles(w http.ResponseWriter, r *http.Request) {
@@ -254,19 +233,40 @@ func (h *handler) attachFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(uploads) == 0 {
-		http.Error(w, noFilesProblem, http.StatusUnprocessableEntity)
+		h.renderPage(w, r, http.StatusUnprocessableEntity, p, noFilesProblem)
 		return
 	}
 	_, err := h.store.Attach(r.Context(), p.ID, uploads)
-	if problem := saveProblem(err); problem != "" {
-		h.renderEdit(w, r, http.StatusUnprocessableEntity, p, pageForm{}, problem)
+	if problem := uploadProblem(err); problem != "" {
+		h.renderPage(w, r, http.StatusUnprocessableEntity, p, problem)
 		return
 	}
 	if err != nil {
 		respondError(w, r, err)
 		return
 	}
-	http.Redirect(w, r, PageURL(p.ID)+"/edit", http.StatusSeeOther)
+	http.Redirect(w, r, PageURL(p.ID), http.StatusSeeOther)
+}
+
+func (h *handler) movePage(w http.ResponseWriter, r *http.Request) {
+	p, ok := h.loadOwnPage(w, r)
+	if !ok {
+		return
+	}
+	parent, ok := parseID(r.PostFormValue("parent"))
+	if !ok {
+		http.Error(w, "Invalid parent.", http.StatusBadRequest)
+		return
+	}
+	err := h.store.Move(r.Context(), p.ID, parent)
+	switch {
+	case errors.Is(err, ErrInvalidParent):
+		h.renderPage(w, r, http.StatusUnprocessableEntity, p, parentProblem)
+	case err != nil:
+		respondError(w, r, err)
+	default:
+		http.Redirect(w, r, PageURL(p.ID), http.StatusSeeOther)
+	}
 }
 
 func (h *handler) trashPage(w http.ResponseWriter, r *http.Request) {
@@ -389,13 +389,9 @@ func (h *handler) receive(w http.ResponseWriter, r *http.Request) (url.Values, [
 	return nil, nil, false
 }
 
-// saveProblem is the message for an input that err rejects, or empty when err is not about the input.
-func saveProblem(err error) string {
+// uploadProblem is the message for a file that err rejects, or empty when err is not about the file.
+func uploadProblem(err error) string {
 	switch {
-	case errors.Is(err, ErrInvalidTitle):
-		return titleProblem
-	case errors.Is(err, ErrInvalidParent):
-		return parentProblem
 	case errors.Is(err, drive.ErrNameTaken):
 		return fileNameProblem
 	case errors.Is(err, drive.ErrInvalidName):

@@ -2,72 +2,52 @@
 {{define "head"}}
 <meta name="htmx-config" content='{"scrollIntoViewOnBoost":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
 <script src="/static/htmx-2.0.11.min.js" defer></script>
-<script src="/static/markdown_editor.js" defer></script>
+{{template "editor-head"}}
 {{end}}
 {{define "content"}}
 <header>
   <nav aria-label="Breadcrumb"><a href="/task/projects">Projects</a></nav>
-  <h1>{{.Project.Name}}</h1>
-  {{if not .Editing}}
+  {{template "editor-title" .Editor}}
   <div class="actions">
-    <a class="button" href="{{.EditURL}}" hx-boost="true">Edit</a>
     <form method="post" action="{{.DeleteURL}}" onsubmit="return confirm('Delete this project and its tasks? Their pages move to the page trash.')">
       <button type="submit" class="danger">Delete</button>
     </form>
   </div>
-  <dl>
-    <div><dt>Status</dt><dd>{{.Project.Status.Label}}</dd></div>
-    {{with .Period}}<div><dt>Period</dt><dd>{{.}}</dd></div>{{end}}
-  </dl>
-  {{end}}
 </header>
-{{with .Error}}<p role="alert">{{.}}</p>{{end}}
-{{if .Editing}}
-<form method="post" action="{{.EditURL}}" enctype="multipart/form-data" hx-boost="true">
+<form id="project-fields" method="post" action="{{.FieldsURL}}" hx-target="#project-fields" hx-select="#project-fields" hx-swap="outerHTML">
   <fieldset>
-    <label>Name
-      <input name="name" value="{{.Edit.Name}}" autocomplete="off" required>
-    </label>
     <label>Status
-      <select name="status">
-        {{range .Statuses}}<option value="{{.}}"{{if eq . $.Edit.Status}} selected{{end}}>{{.Label}}</option>{{end}}
+      <select hx-post="{{$.FieldsURL}}" name="status">
+        {{range .Statuses}}<option value="{{.}}"{{if eq . $.Project.Status}} selected{{end}}>{{.Label}}</option>{{end}}
       </select>
     </label>
     <label>Started
-      <input type="date" name="started" value="{{.Edit.Started}}">
+      <input type="date" hx-post="{{$.FieldsURL}}" hx-trigger="blur changed" name="started" value="{{.Started}}">
     </label>
     <label>Finished
-      <input type="date" name="finished" value="{{.Edit.Finished}}">
+      <input type="date" hx-post="{{$.FieldsURL}}" hx-trigger="blur changed" name="finished" value="{{.Finished}}">
     </label>
+    <noscript><button type="submit">Save</button></noscript>
   </fieldset>
-  <label>Details
-    <textarea name="body" rows="12" data-attach>{{.Edit.Body}}</textarea>
-  </label>
-  <input type="file" name="files" multiple hidden>
-  <small>Markdown. Write [[Title]] to add a subpage. Paste or drop images into the text to add them; they upload when you save.</small>
-  <div class="actions">
-    <button type="submit" class="primary">Save</button>
-    <a href="{{.URL}}">Cancel</a>
-  </div>
+  {{with .FieldsError}}<p role="alert">{{.}}</p>{{end}}
 </form>
-<form method="post" action="{{.FilesURL}}" enctype="multipart/form-data">
-  <fieldset>
-    <label>Attach files (save your changes first)
-      <input type="file" name="files" multiple required>
-    </label>
-    <button type="submit">Attach</button>
-  </fieldset>
-</form>
-{{else}}
-{{with .Project.Body}}<article aria-label="Details">{{markdown .}}</article>{{end}}
-{{end}}
+{{template "editor" .Editor}}
 {{template "page-links" .Links}}
-<section aria-labelledby="tasks">
+<section id="open-tasks" aria-labelledby="tasks" hx-target="#open-tasks" hx-select="#open-tasks" hx-swap="outerHTML" hx-push-url="false">
   <h2 id="tasks">Open tasks</h2>
+  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
   {{template "task-add" .Tasks}}
   {{template "task-table" .Tasks}}
   {{if not .Tasks.Rows}}<p>No open tasks.</p>{{end}}
   <p><a href="{{.AllTasksURL}}">All tasks of this project</a></p>
 </section>
+<form method="post" action="{{.FilesURL}}" enctype="multipart/form-data">
+  <fieldset>
+    <label>Attach files
+      <input type="file" name="files" multiple required>
+    </label>
+    <button type="submit">Attach</button>
+  </fieldset>
+</form>
 {{template "attachments" .Attachments}}
 {{end}}
