@@ -18,6 +18,7 @@
   --chart-height: 320px;
   --preview-height: 70vh;
   --sidebar-width: 200px;
+  --topbar-height: 48px;
   --sidebar-collapsed-width: 40px;
   --tabbar-height: 56px;
 
@@ -83,19 +84,75 @@ h1 {
   font-weight: 600;
 }
 
+body > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  height: var(--topbar-height);
+  padding: 0 var(--space-m);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+body > header > a {
+  padding: var(--space-xs) var(--space-s);
+  color: var(--text);
+  font-weight: 600;
+}
+
+body > header nav {
+  display: flex;
+  flex: 1;
+  gap: var(--space-2xs);
+  overflow-x: auto;
+}
+
+body > header nav a {
+  padding: var(--space-xs) var(--space-m);
+  border-radius: var(--radius);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+body > header a:hover,
+body > header button:hover {
+  background: var(--bg-hover);
+  text-decoration: none;
+}
+
+body > header nav a[aria-current="page"] {
+  background: var(--bg-hover);
+  font-weight: 600;
+}
+
+body > header button {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-weight: 400;
+}
+
 body:has(> aside) {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
   min-height: 100vh;
+}
+
+body:has(> aside) > header {
+  grid-column: 1 / -1;
 }
 
 aside {
   position: sticky;
-  top: 0;
+  top: var(--topbar-height);
   display: flex;
   flex-direction: column;
   gap: var(--gap);
-  height: 100dvh;
+  height: calc(100dvh - var(--topbar-height));
   overflow-y: auto;
   padding: var(--gap) var(--space-m);
   background: var(--bg-subtle);
@@ -124,16 +181,7 @@ aside button:hover {
 
 aside header {
   display: flex;
-  align-items: center;
-  gap: var(--space-2xs);
-  padding-bottom: var(--space-m);
-  border-bottom: 1px solid var(--border);
-}
-
-aside .brand {
-  flex: 1;
-  padding: var(--space-xs) var(--space-s);
-  font-weight: 600;
+  justify-content: flex-end;
 }
 
 aside header button {
@@ -149,8 +197,7 @@ aside header button {
     padding-inline: var(--space-2xs);
   }
 
-  :root[data-sidebar-collapsed] aside > :not(header),
-  :root[data-sidebar-collapsed] aside .brand {
+  :root[data-sidebar-collapsed] aside > :not(header) {
     display: none;
   }
 
@@ -166,7 +213,7 @@ aside section {
 }
 
 aside nav {
-  gap: var(--gap);
+  gap: var(--space-3xs);
 }
 
 aside section {
@@ -185,15 +232,33 @@ aside section a {
   padding-left: var(--space-l);
 }
 
+aside .pages {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-block: var(--space-m);
+}
+
+aside .pages > a {
+  grid-column: 1 / -1;
+}
+
+aside h2 a {
+  display: inline;
+  padding: 0;
+  color: inherit;
+}
+
+aside .pages button {
+  width: auto;
+  height: auto;
+  padding: 0 var(--space-xs);
+  font-size: var(--size);
+}
+
 aside a[aria-current="page"] {
   background: var(--bg-hover);
   font-weight: 600;
-}
-
-aside > form {
-  margin-top: auto;
-  padding-top: var(--space-m);
-  border-top: 1px solid var(--border);
 }
 
 aside button {
@@ -625,7 +690,7 @@ td button.danger:hover {
   text-decoration: underline;
 }
 
-body:not(:has(> aside)) main {
+body:not(:has(> header)) main {
   max-width: 360px;
   margin: 12vh auto 0;
   padding: var(--space-2xl);
@@ -634,7 +699,7 @@ body:not(:has(> aside)) main {
   background: var(--bg-subtle);
 }
 
-body:not(:has(> aside)) button {
+body:not(:has(> header)) button {
   width: 100%;
 }
 
@@ -671,6 +736,25 @@ body:not(:has(> aside)) button {
     display: contents;
   }
 
+  body > header {
+    gap: var(--space-2xs);
+    padding: 0 var(--space-xs);
+  }
+
+  body > header nav a {
+    padding: var(--space-xs) var(--space-s);
+  }
+
+  aside .pages,
+  aside .pages h2 {
+    display: contents;
+  }
+
+  aside .pages > a,
+  aside .pages form {
+    display: none;
+  }
+
   aside nav a {
     flex: 1;
   }
@@ -690,12 +774,8 @@ body:not(:has(> aside)) button {
   aside nav a {
     color: var(--text);
     font-weight: 500;
-  }
-
-  aside > form {
-    margin: 0;
-    padding: 0;
-    border: 0;
+    letter-spacing: normal;
+    text-transform: none;
   }
 
   aside nav a[aria-current="page"] {
@@ -825,6 +905,10 @@ article[data-editor] .milkdown {
 
 article[data-editor] .milkdown .ProseMirror {
   padding: var(--space-s) 0 var(--space-s) var(--space-2xl);
+}
+
+article[data-editor] .ProseMirror :is(a[href^="/page/pages/"], a[href^="/task/tasks/"], a[href^="/task/projects/"]) {
+  cursor: pointer;
 }
 
 .page-picker {

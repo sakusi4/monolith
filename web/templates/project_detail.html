@@ -32,7 +32,7 @@
   {{with .FieldsError}}<p role="alert">{{.}}</p>{{end}}
 </form>
 {{template "editor" .Editor}}
-{{template "page-links" .Links}}
+{{template "backlinks" .Backlinks}}
 <section id="open-tasks" aria-labelledby="tasks" hx-target="#open-tasks" hx-select="#open-tasks" hx-swap="outerHTML" hx-push-url="false">
   <h2 id="tasks">Open tasks</h2>
   {{with .Error}}<p role="alert">{{.}}</p>{{end}}
@@ -41,13 +41,4 @@
   {{if not .Tasks.Rows}}<p>No open tasks.</p>{{end}}
   <p><a href="{{.AllTasksURL}}">All tasks of this project</a></p>
 </section>
-<form method="post" action="{{.FilesURL}}" enctype="multipart/form-data">
-  <fieldset>
-    <label>Attach files
-      <input type="file" name="files" multiple required>
-    </label>
-    <button type="submit">Attach</button>
-  </fieldset>
-</form>
-{{template "attachments" .Attachments}}
 {{end}}

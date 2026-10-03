@@ -2,25 +2,18 @@
 {{define "content"}}
 <header>
   <h1>Pages</h1>
+  <div class="actions">
+    <form method="post" action="/page/pages/new">
+      <button type="submit" class="primary">New page</button>
+    </form>
+  </div>
 </header>
-{{template "filters" .Filters}}
-<form method="post" action="/page/pages/new">
-  <fieldset>
-    <label>New page
-      <input name="title" value="{{.NewTitle}}" autocomplete="off" required>
-    </label>
-    <button type="submit" class="primary">Create</button>
-  </fieldset>
-  {{with .Error}}<p role="alert">{{.}}</p>{{end}}
-</form>
-{{if .Pages}}
+{{if .}}
 <ul>
-  {{range .Pages}}<li><a href="{{.URL}}">{{.Title}}</a> <small>{{.Path}}</small></li>{{end}}
+  {{range .}}<li><a href="{{.URL}}">{{.Title}}</a></li>{{end}}
 </ul>
-{{else if .Searching}}
-<p>No pages match.</p>
 {{else}}
 <p>No pages yet.</p>
 {{end}}
-<p><a href="/page/trash">Trash</a></p>
+<p><a href="/page/search">Search</a> · <a href="/page/trash">Trash</a></p>
 {{end}}

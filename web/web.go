@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"html/template"
@@ -21,7 +22,7 @@ var files embed.FS
 var pages = parsePages()
 
 func parsePages() map[string]*template.Template {
-	funcs := template.FuncMap{"money": money.Format, "current": currentFunc("")}
+	funcs := template.FuncMap{"money": money.Format, "current": currentFunc(""), "sidebarPages": sidebarPagesFunc(nil)}
 	names, err := fs.Glob(files, "templates/*.html")
 	if err != nil {
 		panic(err)
@@ -49,7 +50,8 @@ func Render(w http.ResponseWriter, r *http.Request, status int, page string, dat
 		ServerError(w, r, fmt.Errorf("clone %s: %w", page, err))
 		return
 	}
-	t.Funcs(template.FuncMap{"current": currentFunc(r.URL.Path)})
+	pages, _ := r.Context().Value(sidebarPagesKey{}).([]Link)
+	t.Funcs(template.FuncMap{"current": currentFunc(r.URL.Path), "sidebarPages": sidebarPagesFunc(pages)})
 	var buf bytes.Buffer
 	if err := t.ExecuteTemplate(&buf, "layout.html", data); err != nil {
 		ServerError(w, r, fmt.Errorf("render %s: %w", page, err))
@@ -63,10 +65,32 @@ func Render(w http.ResponseWriter, r *http.Request, status int, page string, dat
 }
 
 // currentFunc backs the "current" template function, which reports whether the request
-// path is under one of the given prefixes, to mark the navigation link of the current page.
+// path is one of the given paths or under one of them, to mark the navigation link of the current page.
 func currentFunc(path string) func(prefixes ...string) bool {
 	return func(prefixes ...string) bool {
-		return slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(path, prefix) })
+		return slices.ContainsFunc(prefixes, func(prefix string) bool {
+			return path == prefix || strings.HasPrefix(path, prefix+"/")
+		})
+	}
+}
+
+// Link is a titled address, as the sidebar lists pages.
+type Link struct {
+	Title string
+	URL   string
+}
+
+type sidebarPagesKey struct{}
+
+// WithSidebarPages returns ctx carrying pages, which the sidebar of a screen rendered for the request
+// lists.
+func WithSidebarPages(ctx context.Context, pages []Link) context.Context {
+	return context.WithValue(ctx, sidebarPagesKey{}, pages)
+}
+
+func sidebarPagesFunc(pages []Link) func() []Link {
+	return func() []Link {
+		return pages
 	}
 }
 

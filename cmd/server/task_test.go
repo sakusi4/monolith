@@ -180,9 +180,6 @@ func TestTasks(t *testing.T) {
 		if err := s.db.QueryRowContext(t.Context(), `SELECT p.name FROM folders f JOIN folders p ON p.id = f.parent_id WHERE f.name = 'Heriot Watt'`).Scan(&parent); err != nil || parent != "Projects" {
 			t.Errorf("folder Heriot Watt is under %q, %v, want Projects", parent, err)
 		}
-		if page := body(t, "/task/projects/"+heriot); !strings.Contains(page, "Open in Drive") {
-			t.Errorf("project page does not link its folder:\n%s", page)
-		}
 		if rec := s.post(t, "/task/projects/new", url.Values{"name": {"Heriot Watt"}}, session); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("second Heriot Watt project = %d, want 422", rec.Code)
 		}
@@ -247,14 +244,13 @@ func TestTasks(t *testing.T) {
 		}
 	})
 
-	t.Run("attachments go to the task's own folder", func(t *testing.T) {
+	t.Run("uploads go to the task's own folder", func(t *testing.T) {
 		enrol, laundry, architecture := taskID(t, "Enrol"), taskID(t, "Laundry"), taskID(t, "Architecture")
-		wantRedirect(t, send(t, "/task/tasks/"+enrol+"/files", nil, [2]string{"offer.pdf", "%PDF"}), "/task/tasks/"+enrol)
+		if rec := send(t, "/task/tasks/"+enrol+"/images", nil, [2]string{"offer.pdf", "%PDF"}); rec.Code != http.StatusCreated {
+			t.Errorf("file upload = %d, want 201", rec.Code)
+		}
 		if _, path := folderOf(t, enrol); !slices.Equal(path, []string{"Projects", "Heriot-Watt MSc", "Tasks", "Enrol"}) {
 			t.Errorf("task folder = %v, want Projects/Heriot-Watt MSc/Tasks/Enrol", path)
-		}
-		if page := body(t, "/task/tasks/"+enrol); !strings.Contains(page, "offer.pdf") {
-			t.Errorf("task page does not list the attachment:\n%s", page)
 		}
 		rec := send(t, "/task/tasks/"+laundry+"/images", nil, [2]string{"shot.png", "png"})
 		shot := idOf(t, `SELECT id FROM files WHERE name = $1`, "shot.png")
@@ -264,7 +260,7 @@ func TestTasks(t *testing.T) {
 		if _, path := folderOf(t, laundry); !slices.Equal(path, []string{"Inbox", "Laundry"}) {
 			t.Errorf("inbox task folder = %v, want Inbox/Laundry", path)
 		}
-		if rec := send(t, "/task/tasks/"+architecture+"/files", nil, [2]string{"a.txt", "a"}); rec.Code != http.StatusUnprocessableEntity {
+		if rec := send(t, "/task/tasks/"+architecture+"/images", nil, [2]string{"a.txt", "a"}); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("upload to a task whose project has no folder = %d, want 422", rec.Code)
 		}
 	})
@@ -327,9 +323,6 @@ func TestTasks(t *testing.T) {
 		rec := s.post(t, "/page/pages/new", url.Values{"title": {"Reading list"}, "parent": {heriotPage}}, session)
 		list := idOf(t, `SELECT id FROM pages WHERE title = $1`, "Reading list")
 		wantRedirect(t, rec, "/page/pages/"+list)
-		if page := body(t, "/task/projects/"+heriot); !strings.Contains(page, `href="/page/pages/`+list+`"`) {
-			t.Errorf("project page does not list its subpage:\n%s", page)
-		}
 		if page := body(t, "/page/pages/"+list); !strings.Contains(page, `<a href="/task/projects/`+heriot+`">Heriot-Watt MSc</a>`) {
 			t.Errorf("the subpage's path does not lead to the project:\n%s", page)
 		}

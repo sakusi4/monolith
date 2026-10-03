@@ -69,39 +69,11 @@ type Crumb struct {
 	URL   string
 }
 
-// kind is the section a tree of pages belongs to: pages of their own, or the pages of projects or
-// tasks. All stands for every kind in the Pages filter.
-type kind string
-
-const (
-	kindAll     kind = "all"
-	kindPage    kind = "page"
-	kindProject kind = "project"
-	kindTask    kind = "task"
-)
-
-var kinds = []kind{kindAll, kindPage, kindProject, kindTask}
-
-func (k kind) Label() string {
-	switch k {
-	case kindAll:
-		return "All"
-	case kindPage:
-		return "Pages"
-	case kindProject:
-		return "Projects"
-	case kindTask:
-		return "Tasks"
-	}
-	return string(k)
-}
-
-// Entry is a page in a list, in the section Kind. Path names the section and the pages above it, as
-// "Pages / 기술 정리", and URL is the screen of the project or task when the page is the body of one.
+// Entry is a page in a list. Path names the section and the pages above it, as "Pages / 기술 정리",
+// and URL is the screen of the project or task when the page is the body of one.
 type Entry struct {
 	ID    int64
 	Title string
-	Kind  kind
 	Path  string
 	URL   string
 }
@@ -128,17 +100,6 @@ func entryURL(id int64, owner Owner) string {
 		return tasksURL + "/" + strconv.FormatInt(owner.TaskID, 10)
 	}
 	return PageURL(id)
-}
-
-// kindOf is the section of a tree of pages whose top page has owner.
-func kindOf(owner Owner) kind {
-	switch {
-	case owner.ProjectID != 0:
-		return kindProject
-	case owner.TaskID != 0:
-		return kindTask
-	}
-	return kindPage
 }
 
 // section is the list that a tree of pages belongs to, by the owner of its top page.
@@ -374,12 +335,11 @@ func (s *Store) Crumbs(ctx context.Context, p Page) ([]Crumb, error) {
 	return crumbs, nil
 }
 
-// TopPages returns the pages at the top level outside the trash, the pages of their own and those of
-// projects and tasks, by title.
+// TopPages returns the pages of their own at the top level outside the trash, by title.
 func (s *Store) TopPages(ctx context.Context) ([]Entry, error) {
 	query := `
-		SELECT id, title, project_id, task_id FROM pages
-		WHERE parent_id IS NULL AND trashed_at IS NULL
+		SELECT id, title FROM pages
+		WHERE parent_id IS NULL AND project_id IS NULL AND task_id IS NULL AND trashed_at IS NULL
 		ORDER BY lower(title), id`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
@@ -388,15 +348,11 @@ func (s *Store) TopPages(ctx context.Context) ([]Entry, error) {
 	defer rows.Close()
 	var entries []Entry
 	for rows.Next() {
-		var (
-			e             Entry
-			project, task sql.Null[int64]
-		)
-		if err := rows.Scan(&e.ID, &e.Title, &project, &task); err != nil {
+		var e Entry
+		if err := rows.Scan(&e.ID, &e.Title); err != nil {
 			return nil, fmt.Errorf("scan top page: %w", err)
 		}
-		owner := Owner{ProjectID: project.V, TaskID: task.V}
-		e.Kind, e.Path, e.URL = kindOf(owner), section(owner).Title, entryURL(e.ID, owner)
+		e.URL = PageURL(e.ID)
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -433,8 +389,7 @@ func (s *Store) ParentChoices(ctx context.Context, id int64) ([]Entry, error) {
 		if err := rows.Scan(&e.ID, &e.Title, &path, &project, &task); err != nil {
 			return nil, fmt.Errorf("scan parent choice: %w", err)
 		}
-		owner := Owner{ProjectID: project.V, TaskID: task.V}
-		e.Kind, e.Path = kindOf(owner), joinPath(section(owner).Title, path)
+		e.Path = joinPath(section(Owner{ProjectID: project.V, TaskID: task.V}).Title, path)
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -481,7 +436,7 @@ func (s *Store) describe(ctx context.Context, ids []int64, hidden bool) ([]Entry
 			return nil, fmt.Errorf("scan page path: %w", err)
 		}
 		owner := Owner{ProjectID: project.V, TaskID: task.V}
-		e.Kind, e.Path, e.URL = kindOf(owner), joinPath(section(owner).Title, path), PageURL(e.ID)
+		e.Path, e.URL = joinPath(section(owner).Title, path), PageURL(e.ID)
 		if path == "" {
 			e.URL = entryURL(e.ID, owner)
 		}

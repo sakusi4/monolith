@@ -1,0 +1,10 @@
+{{define "backlinks"}}
+{{with .}}
+<section aria-labelledby="linked-from">
+  <h2 id="linked-from">Linked from</h2>
+  <ul>
+    {{range .}}<li><a href="{{.URL}}">{{.Title}}</a> <small>{{.Path}}</small></li>{{end}}
+  </ul>
+</section>
+{{end}}
+{{end}}

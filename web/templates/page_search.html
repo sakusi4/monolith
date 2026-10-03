@@ -1,0 +1,21 @@
+{{define "title"}}Search{{end}}
+{{define "content"}}
+<header>
+  <h1>Search</h1>
+</header>
+<search>
+  <form method="get" action="/page/search">
+    <label>Pages
+      <input type="search" name="q" value="{{.Query}}" autofocus>
+    </label>
+    <button type="submit">Search</button>
+  </form>
+</search>
+{{if .Pages}}
+<ul>
+  {{range .Pages}}<li><a href="{{.URL}}">{{.Title}}</a> <small>{{.Path}}</small></li>{{end}}
+</ul>
+{{else if .Query}}
+<p>No pages match.</p>
+{{end}}
+{{end}}

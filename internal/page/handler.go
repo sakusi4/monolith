@@ -1,6 +1,7 @@
 package page
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
 	"net/url"
@@ -16,6 +17,8 @@ const (
 	trashURL             = "/page/trash"
 	dateLayout           = "Jan 2, 2006"
 	maxLinks             = 10
+	maxResults           = 100
+	untitled             = "Untitled"
 	titleProblem         = "Enter a title."
 	parentProblem        = "Pick a parent that is not this page or one of its subpages."
 	parentTrashedProblem = "The parent page is in the trash."
@@ -36,12 +39,12 @@ func NewHandler(store *Store, loc *time.Location, maxUpload int64) http.Handler 
 	h := &handler{store: store, loc: loc, maxUpload: maxUpload}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /page", h.listPages)
+	mux.HandleFunc("GET /page/search", h.searchPages)
 	mux.HandleFunc("GET /page/links", h.listLinks)
 	mux.HandleFunc("POST /page/pages/new", h.createPage)
 	mux.HandleFunc("GET /page/pages/{id}", h.showPage)
 	mux.HandleFunc("POST /page/pages/{id}/content", h.saveContent)
 	mux.HandleFunc("POST /page/pages/{id}/images", h.uploadImages)
-	mux.HandleFunc("POST /page/pages/{id}/files", h.attachFiles)
 	mux.HandleFunc("POST /page/pages/{id}/move", h.movePage)
 	mux.HandleFunc("POST /page/pages/{id}/delete", h.trashPage)
 	mux.HandleFunc("GET /page/trash", h.showTrash)
@@ -51,25 +54,20 @@ func NewHandler(store *Store, loc *time.Location, maxUpload int64) http.Handler 
 	return mux
 }
 
-type listView struct {
-	Filters   web.FilterBar
-	Searching bool
-	Pages     []Entry
-	NewTitle  string
-	Error     string
+type searchView struct {
+	Query string
+	Pages []Entry
 }
 
 type detailView struct {
-	Page        Page
-	Crumbs      []Crumb
-	Editor      Editor
-	Links       Links
-	Parents     []Entry
-	Attachments drive.Attachments
-	Error       string
-	MoveURL     string
-	FilesURL    string
-	DeleteURL   string
+	Page      Page
+	Crumbs    []Crumb
+	Editor    Editor
+	Backlinks []Entry
+	Parents   []Entry
+	Error     string
+	MoveURL   string
+	DeleteURL string
 }
 
 type trashView struct {
@@ -84,30 +82,29 @@ type trashRow struct {
 	DeleteURL  string
 }
 
+// listPages shows the pages of their own at the top level, which the sidebar lists on wide screens.
 func (h *handler) listPages(w http.ResponseWriter, r *http.Request) {
-	h.renderList(w, r, http.StatusOK, "", "")
-}
-
-// renderList shows the pages at the top, or the search results, of the kind the query asks for, with
-// the new page form holding newTitle and problem.
-func (h *handler) renderList(w http.ResponseWriter, r *http.Request, status int, newTitle, problem string) {
-	q, err := parsePageQuery(r.URL.Query())
-	if err != nil {
-		http.Error(w, "Invalid filter.", http.StatusBadRequest)
-		return
-	}
-	var entries []Entry
-	if q.Q != "" {
-		entries, err = h.store.Search(r.Context(), q.Q)
-	} else {
-		entries, err = h.store.TopPages(r.Context())
-	}
+	entries, err := h.store.TopPages(r.Context())
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
 	}
-	view := listView{Filters: q.filters(), Searching: q.Q != "", Pages: q.pick(entries), NewTitle: newTitle, Error: problem}
-	web.Render(w, r, status, "page_list", view)
+	web.Render(w, r, http.StatusOK, "page_list", entries)
+}
+
+// searchPages shows the search form and, when the query value q is set, the pages that match it.
+func (h *handler) searchPages(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		web.Render(w, r, http.StatusOK, "page_search", searchView{})
+		return
+	}
+	entries, err := h.store.Search(r.Context(), q)
+	if err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	web.Render(w, r, http.StatusOK, "page_search", searchView{Query: q, Pages: entries[:min(len(entries), maxResults)]})
 }
 
 // listLinks shows the pages that the editor's picker offers for the query value q: the matches, or
@@ -121,8 +118,9 @@ func (h *handler) listLinks(w http.ResponseWriter, r *http.Request) {
 	web.Render(w, r, http.StatusOK, "page_links", entries[:min(len(entries), maxLinks)])
 }
 
+// createPage adds a page titled by the form value title, or Untitled without one, and opens it.
 func (h *handler) createPage(w http.ResponseWriter, r *http.Request) {
-	title := r.PostFormValue("title")
+	title := cmp.Or(r.PostFormValue("title"), untitled)
 	parent, ok := parseID(r.PostFormValue("parent"))
 	if !ok {
 		http.Error(w, "Invalid parent.", http.StatusBadRequest)
@@ -131,9 +129,9 @@ func (h *handler) createPage(w http.ResponseWriter, r *http.Request) {
 	id, err := h.store.Create(r.Context(), parent, title)
 	switch {
 	case errors.Is(err, ErrInvalidTitle):
-		h.renderList(w, r, http.StatusUnprocessableEntity, title, titleProblem)
+		http.Error(w, titleProblem, http.StatusUnprocessableEntity)
 	case errors.Is(err, ErrInvalidParent):
-		h.renderList(w, r, http.StatusUnprocessableEntity, title, parentTrashedProblem)
+		http.Error(w, parentTrashedProblem, http.StatusUnprocessableEntity)
 	case err != nil:
 		web.ServerError(w, r, err)
 	default:
@@ -153,41 +151,29 @@ func (h *handler) showPage(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, r, http.StatusOK, p, "")
 }
 
-// renderPage shows p, a page of its own, with problem from a move or an attachment that failed.
+// renderPage shows p, a page of its own, with problem from a move that failed.
 func (h *handler) renderPage(w http.ResponseWriter, r *http.Request, status int, p Page, problem string) {
 	ctx := r.Context()
-	crumbs, err := h.store.Crumbs(ctx, p)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	links, err := h.store.Links(ctx, p.ID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	parents, err := h.store.ParentChoices(ctx, p.ID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	sec, err := h.store.drive.Attachments(ctx, p.FolderID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
 	u := PageURL(p.ID)
 	view := detailView{
-		Page:        p,
-		Crumbs:      crumbs,
-		Editor:      Editor{PageID: p.ID, Title: p.Title, Body: p.Body, Version: FormatVersion(p.UpdatedAt), ContentURL: u + "/content", ImagesURL: u + "/images"},
-		Links:       links,
-		Parents:     parents,
-		Attachments: sec,
-		Error:       problem,
-		MoveURL:     u + "/move",
-		FilesURL:    u + "/files",
-		DeleteURL:   u + "/delete",
+		Page:      p,
+		Editor:    Editor{PageID: p.ID, Title: p.Title, Body: p.Body, Version: FormatVersion(p.UpdatedAt), ContentURL: u + "/content", ImagesURL: u + "/images"},
+		Error:     problem,
+		MoveURL:   u + "/move",
+		DeleteURL: u + "/delete",
+	}
+	var err error
+	if view.Backlinks, err = h.store.Backlinks(ctx, p.ID); err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	if view.Crumbs, err = h.store.Crumbs(ctx, p); err != nil {
+		web.ServerError(w, r, err)
+		return
+	}
+	if view.Parents, err = h.store.ParentChoices(ctx, p.ID); err != nil {
+		web.ServerError(w, r, err)
+		return
 	}
 	web.Render(w, r, status, "page_detail", view)
 }
@@ -221,31 +207,6 @@ func (h *handler) uploadImages(w http.ResponseWriter, r *http.Request) {
 	}
 	files, err := h.store.Attach(r.Context(), p.ID, uploads)
 	RespondUploaded(w, r, files, err, uploadProblem(err))
-}
-
-func (h *handler) attachFiles(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.loadOwnPage(w, r)
-	if !ok {
-		return
-	}
-	_, uploads, ok := h.receive(w, r)
-	if !ok {
-		return
-	}
-	if len(uploads) == 0 {
-		h.renderPage(w, r, http.StatusUnprocessableEntity, p, noFilesProblem)
-		return
-	}
-	_, err := h.store.Attach(r.Context(), p.ID, uploads)
-	if problem := uploadProblem(err); problem != "" {
-		h.renderPage(w, r, http.StatusUnprocessableEntity, p, problem)
-		return
-	}
-	if err != nil {
-		respondError(w, r, err)
-		return
-	}
-	http.Redirect(w, r, PageURL(p.ID), http.StatusSeeOther)
 }
 
 func (h *handler) movePage(w http.ResponseWriter, r *http.Request) {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/sakusi4/monolith/internal/drive"
 	"github.com/sakusi4/monolith/internal/page"
 	"github.com/sakusi4/monolith/web"
 )
@@ -31,18 +30,16 @@ type projectPage struct {
 	Finished    string
 	Tasks       taskTable
 	AllTasksURL string
-	Links       page.Links
-	Attachments drive.Attachments
+	Backlinks   []page.Entry
 	FieldsError string
 	Error       string
 	URL         string
 	FieldsURL   string
-	FilesURL    string
 	DeleteURL   string
 }
 
-// projectView is what a request adds to a project page: a change of its fields that failed, a quick
-// add or a change in the task table that failed, or an attachment that failed.
+// projectView is what a request adds to a project page: a change of its fields that failed, or a quick
+// add or a change in the task table that failed.
 type projectView struct {
 	FieldsError string
 	Error       string
@@ -120,12 +117,7 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 		web.ServerError(w, r, err)
 		return
 	}
-	sec, err := h.store.drive.Attachments(ctx, p.FolderID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	links, err := h.store.pages.Links(ctx, p.PageID)
+	backlinks, err := h.store.pages.Backlinks(ctx, p.PageID)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
@@ -141,13 +133,11 @@ func (h *handler) renderProject(w http.ResponseWriter, r *http.Request, status i
 		Finished:    dateInput(p.FinishedOn),
 		Tasks:       table,
 		AllTasksURL: tasksURL + "?" + taskQuery{Status: statusAll, ProjectID: id, Order: orderDue, Direction: web.Asc}.values().Encode(),
-		Links:       links,
-		Attachments: sec,
+		Backlinks:   backlinks,
 		FieldsError: view.FieldsError,
 		Error:       view.Error,
 		URL:         u,
 		FieldsURL:   u + "/fields",
-		FilesURL:    u + "/files",
 		DeleteURL:   u + "/delete",
 	}
 	web.Render(w, r, status, "project_detail", screen)
@@ -216,32 +206,6 @@ func (h *handler) uploadProjectImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page.RespondUploaded(w, r, files, err, attachProblem(err))
-}
-
-func (h *handler) attachProjectFiles(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	_, uploads, ok := h.receive(w, r)
-	if !ok {
-		return
-	}
-	if len(uploads) == 0 {
-		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{Error: noFilesProblem})
-		return
-	}
-	_, err := h.store.AttachToProject(r.Context(), id, uploads)
-	if problem := attachProblem(err); problem != "" {
-		h.renderProject(w, r, http.StatusUnprocessableEntity, id, projectView{Error: problem})
-		return
-	}
-	if err != nil {
-		respondError(w, r, err)
-		return
-	}
-	http.Redirect(w, r, projectURL(id), http.StatusSeeOther)
 }
 
 func (h *handler) deleteProject(w http.ResponseWriter, r *http.Request) {

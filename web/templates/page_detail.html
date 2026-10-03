@@ -12,7 +12,7 @@
 </header>
 {{with .Error}}<p role="alert">{{.}}</p>{{end}}
 {{template "editor" .Editor}}
-{{template "page-links" .Links}}
+{{template "backlinks" .Backlinks}}
 <section aria-labelledby="move">
   <h2 id="move">Move</h2>
   <form method="post" action="{{.MoveURL}}">
@@ -27,13 +27,4 @@
     </fieldset>
   </form>
 </section>
-<form method="post" action="{{.FilesURL}}" enctype="multipart/form-data">
-  <fieldset>
-    <label>Attach files
-      <input type="file" name="files" multiple required>
-    </label>
-    <button type="submit">Attach</button>
-  </fieldset>
-</form>
-{{template "attachments" .Attachments}}
 {{end}}

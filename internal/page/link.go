@@ -10,12 +10,6 @@ import (
 
 var pageLink = regexp.MustCompile(`(?:^|[\s(<\[])(?:https?://[^\s/()<>]+)?/(page/pages|task/projects|task/tasks)/(\d+)\b`)
 
-// Links is the pages under a page and the pages that link to it.
-type Links struct {
-	Children  []Entry
-	Backlinks []Entry
-}
-
 // linkTargets is what a body links to by id: pages, and the pages of projects and tasks.
 type linkTargets struct {
 	Pages    []int64
@@ -59,45 +53,13 @@ func writeLinks(ctx context.Context, tx *sql.Tx, id int64, body string) error {
 	return nil
 }
 
-// Subpages returns the pages under page parent outside the trash, by title.
-func (s *Store) Subpages(ctx context.Context, parent int64) ([]Entry, error) {
-	query := `SELECT id, title FROM pages WHERE parent_id = $1 AND trashed_at IS NULL ORDER BY lower(title), id`
-	rows, err := s.db.QueryContext(ctx, query, parent)
-	if err != nil {
-		return nil, fmt.Errorf("query subpages: %w", err)
-	}
-	defer rows.Close()
-	var entries []Entry
-	for rows.Next() {
-		var e Entry
-		if err := rows.Scan(&e.ID, &e.Title); err != nil {
-			return nil, fmt.Errorf("scan subpage: %w", err)
-		}
-		e.Kind, e.URL = kindPage, PageURL(e.ID)
-		entries = append(entries, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("query subpages: %w", err)
-	}
-	return entries, nil
-}
-
-// Links returns the pages under page id and the pages that link to it, by title, leaving out the
-// ones in the trash.
-func (s *Store) Links(ctx context.Context, id int64) (Links, error) {
-	children, err := s.Subpages(ctx, id)
-	if err != nil {
-		return Links{}, err
-	}
+// Backlinks returns the pages that link to page id, by title, leaving out the ones in the trash.
+func (s *Store) Backlinks(ctx context.Context, id int64) ([]Entry, error) {
 	sources, err := s.linkSources(ctx, id)
 	if err != nil {
-		return Links{}, err
+		return nil, err
 	}
-	backlinks, err := s.describe(ctx, sources, false)
-	if err != nil {
-		return Links{}, err
-	}
-	return Links{Children: children, Backlinks: backlinks}, nil
+	return s.describe(ctx, sources, false)
 }
 
 // linkSources returns the pages that link to page id by title.

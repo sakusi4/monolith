@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/sakusi4/monolith/internal/drive"
 	"github.com/sakusi4/monolith/internal/page"
 	"github.com/sakusi4/monolith/web"
 )
@@ -16,20 +15,18 @@ type taskListPage struct {
 }
 
 type taskPage struct {
-	Task        Task
-	Editor      page.Editor
-	Projects    []Project
-	Statuses    []TaskStatus
-	ProjectURL  string
-	Due         string
-	Completed   string
-	Links       page.Links
-	Attachments drive.Attachments
-	Error       string
-	URL         string
-	FieldsURL   string
-	FilesURL    string
-	DeleteURL   string
+	Task       Task
+	Editor     page.Editor
+	Projects   []Project
+	Statuses   []TaskStatus
+	ProjectURL string
+	Due        string
+	Completed  string
+	Backlinks  []page.Entry
+	Error      string
+	URL        string
+	FieldsURL  string
+	DeleteURL  string
 }
 
 func (h *handler) listTasks(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +97,7 @@ func (h *handler) showTask(w http.ResponseWriter, r *http.Request) {
 	h.renderTask(w, r, http.StatusOK, id, "")
 }
 
-// renderTask shows task id with problem from a change of its fields or an attachment that failed.
+// renderTask shows task id with problem from a change of its fields that failed.
 func (h *handler) renderTask(w http.ResponseWriter, r *http.Request, status int, id int64, problem string) {
 	ctx := r.Context()
 	t, err := h.store.Task(ctx, id)
@@ -113,30 +110,23 @@ func (h *handler) renderTask(w http.ResponseWriter, r *http.Request, status int,
 		web.ServerError(w, r, err)
 		return
 	}
-	sec, err := h.store.drive.Attachments(ctx, t.FolderID)
-	if err != nil {
-		web.ServerError(w, r, err)
-		return
-	}
-	links, err := h.store.pages.Links(ctx, t.PageID)
+	backlinks, err := h.store.pages.Backlinks(ctx, t.PageID)
 	if err != nil {
 		web.ServerError(w, r, err)
 		return
 	}
 	u := taskURL(id)
 	view := taskPage{
-		Task:        t,
-		Editor:      page.Editor{PageID: t.PageID, Title: t.Title, Body: t.Body, Version: page.FormatVersion(t.PageUpdatedAt), ContentURL: u + "/content", ImagesURL: u + "/images"},
-		Projects:    projects,
-		Statuses:    taskStatuses,
-		Due:         dateInput(t.Due),
-		Links:       links,
-		Attachments: sec,
-		Error:       problem,
-		URL:         u,
-		FieldsURL:   u + "/fields",
-		FilesURL:    u + "/files",
-		DeleteURL:   u + "/delete",
+		Task:      t,
+		Editor:    page.Editor{PageID: t.PageID, Title: t.Title, Body: t.Body, Version: page.FormatVersion(t.PageUpdatedAt), ContentURL: u + "/content", ImagesURL: u + "/images"},
+		Projects:  projects,
+		Statuses:  taskStatuses,
+		Due:       dateInput(t.Due),
+		Backlinks: backlinks,
+		Error:     problem,
+		URL:       u,
+		FieldsURL: u + "/fields",
+		DeleteURL: u + "/delete",
 	}
 	if t.ProjectID != 0 {
 		view.ProjectURL = projectURL(t.ProjectID)
@@ -214,32 +204,6 @@ func (h *handler) updateTaskFields(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Redirect(w, r, next, http.StatusSeeOther)
 	}
-}
-
-func (h *handler) attachTaskFiles(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	_, uploads, ok := h.receive(w, r)
-	if !ok {
-		return
-	}
-	if len(uploads) == 0 {
-		h.renderTask(w, r, http.StatusUnprocessableEntity, id, noFilesProblem)
-		return
-	}
-	_, err := h.store.AttachToTask(r.Context(), id, uploads)
-	if problem := attachProblem(err); problem != "" {
-		h.renderTask(w, r, http.StatusUnprocessableEntity, id, problem)
-		return
-	}
-	if err != nil {
-		respondError(w, r, err)
-		return
-	}
-	http.Redirect(w, r, taskURL(id), http.StatusSeeOther)
 }
 
 func (h *handler) deleteTask(w http.ResponseWriter, r *http.Request) {

@@ -27,7 +27,6 @@ const (
 	noFolderProblem  = "The project's folder is missing or in the trash."
 	fileNameProblem  = "A file with that name is already attached."
 	fileNameRule     = "Use file names of up to 255 characters without a slash."
-	noFilesProblem   = "Choose files to attach."
 )
 
 type handler struct {
@@ -47,7 +46,6 @@ func NewHandler(store *Store, loc *time.Location, maxUpload int64) http.Handler 
 	mux.HandleFunc("POST /task/tasks/{id}/fields", h.updateTaskFields)
 	mux.HandleFunc("POST /task/tasks/{id}/content", h.saveTaskContent)
 	mux.HandleFunc("POST /task/tasks/{id}/images", h.uploadTaskImages)
-	mux.HandleFunc("POST /task/tasks/{id}/files", h.attachTaskFiles)
 	mux.HandleFunc("POST /task/tasks/{id}/delete", h.deleteTask)
 	mux.HandleFunc("GET /task/projects", h.listProjects)
 	mux.HandleFunc("POST /task/projects/new", h.createProject)
@@ -55,7 +53,6 @@ func NewHandler(store *Store, loc *time.Location, maxUpload int64) http.Handler 
 	mux.HandleFunc("POST /task/projects/{id}/fields", h.updateProjectFields)
 	mux.HandleFunc("POST /task/projects/{id}/content", h.saveProjectContent)
 	mux.HandleFunc("POST /task/projects/{id}/images", h.uploadProjectImages)
-	mux.HandleFunc("POST /task/projects/{id}/files", h.attachProjectFiles)
 	mux.HandleFunc("POST /task/projects/{id}/delete", h.deleteProject)
 	return mux
 }

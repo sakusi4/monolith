@@ -10,30 +10,45 @@
 </head>
 <body>
   {{block "body" .}}
-  <aside>
-    <header>
-      <span class="brand">monolith</span>
-      <button type="button" aria-label="Toggle sidebar" onclick="localStorage.setItem('sidebar-collapsed', document.documentElement.toggleAttribute('data-sidebar-collapsed') ? '1' : '')">«</button>
-    </header>
-    <nav>
-      <a href="/dashboard"{{if current "/dashboard"}} aria-current="page"{{end}}>Dashboard</a>
-      <a href="/page"{{if current "/page"}} aria-current="page"{{end}}>Pages</a>
+  <header>
+    <a href="/dashboard">monolith</a>
+    <nav aria-label="Areas">
+      <a href="/page"{{if current "/page" "/task"}} aria-current="page"{{end}}>Pages</a>
       <a href="/drive"{{if current "/drive"}} aria-current="page"{{end}}>Drive</a>
-      <section>
-        <h2>Work</h2>
-        <a href="/task/tasks"{{if current "/task/tasks"}} aria-current="page"{{end}}>Tasks</a>
-        <a href="/task/projects"{{if current "/task/projects"}} aria-current="page"{{end}}>Projects</a>
-      </section>
-      <section>
-        <h2>Finance</h2>
-        <a href="/finance/assets"{{if current "/finance/assets"}} aria-current="page"{{end}}>Assets</a>
-        <a href="/finance/expenses"{{if current "/finance/expenses"}} aria-current="page"{{end}}>Expenses</a>
-      </section>
+      <a href="/finance/assets"{{if current "/finance"}} aria-current="page"{{end}}>Finance</a>
     </nav>
     <form method="post" action="/auth/logout">
       <button type="submit">Log out</button>
     </form>
+  </header>
+  {{if current "/page" "/task" "/drive" "/finance"}}
+  <aside>
+    <header>
+      <button type="button" aria-label="Toggle sidebar" onclick="localStorage.setItem('sidebar-collapsed', document.documentElement.toggleAttribute('data-sidebar-collapsed') ? '1' : '')">«</button>
+    </header>
+    <nav aria-label="Menu">
+      {{if current "/page" "/task"}}
+      <a href="/task/projects"{{if current "/task/projects"}} aria-current="page"{{end}}>Projects</a>
+      <a href="/task/tasks"{{if current "/task/tasks"}} aria-current="page"{{end}}>Tasks</a>
+      <section class="pages" aria-labelledby="sidebar-pages">
+        <h2 id="sidebar-pages"><a href="/page"{{if current "/page/pages" "/page/search" "/page/trash"}}{{else if current "/page"}} aria-current="page"{{end}}>Pages</a></h2>
+        <form method="post" action="/page/pages/new">
+          <button type="submit" aria-label="New page">+</button>
+        </form>
+        {{range sidebarPages}}<a href="{{.URL}}"{{if current .URL}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
+      </section>
+      <a href="/page/search"{{if current "/page/search"}} aria-current="page"{{end}}>Search</a>
+      <a href="/page/trash"{{if current "/page/trash"}} aria-current="page"{{end}}>Trash</a>
+      {{else if current "/drive"}}
+      <a href="/drive"{{if current "/drive/trash"}}{{else if current "/drive"}} aria-current="page"{{end}}>Files</a>
+      <a href="/drive/trash"{{if current "/drive/trash"}} aria-current="page"{{end}}>Trash</a>
+      {{else}}
+      <a href="/finance/assets"{{if current "/finance/assets"}} aria-current="page"{{end}}>Assets</a>
+      <a href="/finance/expenses"{{if current "/finance/expenses"}} aria-current="page"{{end}}>Expenses</a>
+      {{end}}
+    </nav>
   </aside>
+  {{end}}
   <main hx-target="main" hx-select="main" hx-swap="outerHTML">
     {{template "content" .}}
   </main>

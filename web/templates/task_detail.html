@@ -38,14 +38,5 @@
   {{with .Error}}<p role="alert">{{.}}</p>{{end}}
 </form>
 {{template "editor" .Editor}}
-{{template "page-links" .Links}}
-<form method="post" action="{{.FilesURL}}" enctype="multipart/form-data">
-  <fieldset>
-    <label>Attach files
-      <input type="file" name="files" multiple required>
-    </label>
-    <button type="submit">Attach</button>
-  </fieldset>
-</form>
-{{template "attachments" .Attachments}}
+{{template "backlinks" .Backlinks}}
 {{end}}
